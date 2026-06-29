@@ -6,6 +6,13 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub gitlab: GitLabConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UiConfig {
+    pub theme: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

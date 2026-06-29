@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod event;
 mod provider;
+mod theme;
 mod ui;
 
 use std::io;

@@ -7,6 +7,7 @@ use crate::config::types::AppConfig;
 use crate::provider::types::{MergeRequest, Pipeline, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
+use crate::theme::{self, Theme};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppScreen {
@@ -58,6 +59,14 @@ pub struct App {
 
     pub config: AppConfig,
     pub http_client: reqwest::Client,
+
+    // Settings modal
+    pub settings_open: bool,
+    pub settings_selected: usize,
+    pub theme_selector_open: bool,
+    pub theme_selected: usize,
+    pub theme_confirmed: usize,
+    pub theme: &'static Theme,
 
     // Click areas (set during render)
     pub tab_mr_area: Option<ratatui::prelude::Rect>,
@@ -111,6 +120,18 @@ impl App {
             Pipeline { id: 497, status: "canceled".into(), r#ref: "main".into(), web_url: "https://gitlab.com/pipelines/497".into() },
         ];
 
+        let active_theme = config
+            .ui
+            .theme
+            .as_deref()
+            .map(theme::find_theme)
+            .unwrap_or(&theme::ONE_DARK);
+
+        let theme_selected = theme::ALL_THEMES
+            .iter()
+            .position(|t| t.name == active_theme.name)
+            .unwrap_or(0);
+
         let mut app = Self {
             screen: AppScreen::Splash,
             should_quit: false,
@@ -130,6 +151,12 @@ impl App {
             message_rx,
             config,
             http_client,
+            settings_open: false,
+            settings_selected: 0,
+            theme_selector_open: false,
+            theme_selected,
+            theme_confirmed: theme_selected,
+            theme: active_theme,
             tab_mr_area: None,
             tab_pipelines_area: None,
             project_selector_area: None,
@@ -217,7 +244,9 @@ impl App {
                 }
             }
             AppScreen::Main => {
-                if self.project_selector_open {
+                if self.settings_open {
+                    self.handle_settings_key(key);
+                } else if self.project_selector_open {
                     match key.code {
                         KeyCode::Esc => self.project_selector_open = false,
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -245,9 +274,61 @@ impl App {
                             };
                         }
                         KeyCode::Char('p') => self.project_selector_open = true,
+                        KeyCode::Char(',') => self.settings_open = true,
                         _ => {}
                     }
                 }
+            }
+        }
+    }
+
+    fn handle_settings_key(&mut self, key: KeyEvent) {
+        if self.theme_selector_open {
+            match key.code {
+                KeyCode::Esc => {
+                    self.theme = theme::ALL_THEMES[self.theme_confirmed];
+                    self.theme_selected = self.theme_confirmed;
+                    self.theme_selector_open = false;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.theme_selected > 0 {
+                        self.theme_selected -= 1;
+                        self.theme = theme::ALL_THEMES[self.theme_selected];
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.theme_selected < theme::ALL_THEMES.len().saturating_sub(1) {
+                        self.theme_selected += 1;
+                        self.theme = theme::ALL_THEMES[self.theme_selected];
+                    }
+                }
+                KeyCode::Enter => {
+                    self.theme_confirmed = self.theme_selected;
+                    self.config.ui.theme = Some(self.theme.name.to_string());
+                    let _ = config::save_config(&self.config);
+                    self.theme_selector_open = false;
+                    self.settings_open = false;
+                }
+                _ => {}
+            }
+        } else {
+            match key.code {
+                KeyCode::Esc => self.settings_open = false,
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.settings_selected > 0 {
+                        self.settings_selected -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    // Only 1 item for now
+                    let _ = self.settings_selected;
+                }
+                KeyCode::Enter => {
+                    if self.settings_selected == 0 {
+                        self.theme_selector_open = true;
+                    }
+                }
+                _ => {}
             }
         }
     }

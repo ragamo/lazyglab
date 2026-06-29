@@ -2,13 +2,14 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table};
 
 use crate::app::{App, Tab};
+use crate::theme::Theme;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
         Constraint::Length(3), // Header with project selector
-        Constraint::Length(2), // Tabs
+        Constraint::Length(1), // Tabs
         Constraint::Min(0),   // Content
         Constraint::Length(1), // Footer
     ])
@@ -17,7 +18,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_header(frame, app, chunks[0]);
     render_tabs(frame, app, chunks[1]);
     render_content(frame, app, chunks[2]);
-    render_footer(frame, chunks[3]);
+    render_footer(frame, app.theme, chunks[3]);
 
     if app.project_selector_open {
         render_project_dropdown(frame, app, chunks[0]);
@@ -25,9 +26,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let bg_block = Block::default().style(Style::default().bg(t.header_bg));
+    frame.render_widget(bg_block, area);
+
     let header_layout = Layout::horizontal([
-        Constraint::Min(20),   // Project selector
-        Constraint::Length(30), // Logo + user info
+        Constraint::Min(20),
+        Constraint::Length(30),
     ])
     .split(area);
 
@@ -41,15 +47,15 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     let selector = Paragraph::new(Span::styled(
         &selector_text,
         Style::default()
-            .fg(Color::White)
-            .bg(Color::DarkGray)
+            .fg(t.text)
+            .bg(t.header_bg)
             .add_modifier(Modifier::BOLD),
     ))
     .block(
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(t.accent)),
     );
 
     let selector_area = Rect {
@@ -63,14 +69,14 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let right_text = if let Some(ref user) = app.current_user {
         vec![
-            Span::styled("lazyglab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("@{}", user.username), Style::default().fg(Color::Green)),
+            Span::styled("lazyglab", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled(format!("@{}", user.username), Style::default().fg(t.success)),
             Span::raw(" "),
         ]
     } else {
         vec![
-            Span::styled("lazyglab", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("lazyglab", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
             Span::raw(" "),
         ]
     };
@@ -80,6 +86,11 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let bg_block = Block::default().style(Style::default().bg(t.header_bg));
+    frame.render_widget(bg_block, area);
+
     let tabs_layout = Layout::horizontal([
         Constraint::Length(18),
         Constraint::Length(18),
@@ -88,38 +99,19 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     .split(area);
 
     let mr_style = if app.active_tab == Tab::MergeRequests {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(t.bg).bg(t.accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(t.text_dim)
     };
 
     let pipeline_style = if app.active_tab == Tab::Pipelines {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(t.bg).bg(t.accent).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(t.text_dim)
     };
 
-    let mr_border = if app.active_tab == Tab::MergeRequests {
-        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔"
-    } else {
-        ""
-    };
-
-    let pipe_border = if app.active_tab == Tab::Pipelines {
-        "▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔"
-    } else {
-        ""
-    };
-
-    let mr_tab = Paragraph::new(vec![
-        Line::from(Span::styled(" ● Merge Requests", mr_style)),
-        Line::from(Span::styled(mr_border, Style::default().fg(Color::Cyan))),
-    ]);
-
-    let pipe_tab = Paragraph::new(vec![
-        Line::from(Span::styled(" ◆ Pipelines", pipeline_style)),
-        Line::from(Span::styled(pipe_border, Style::default().fg(Color::Cyan))),
-    ]);
+    let mr_tab = Paragraph::new(Span::styled(" ● Merge Requests ", mr_style));
+    let pipe_tab = Paragraph::new(Span::styled(" ● Pipelines ", pipeline_style));
 
     frame.render_widget(mr_tab, tabs_layout[0]);
     frame.render_widget(pipe_tab, tabs_layout[1]);
@@ -136,8 +128,10 @@ fn render_content(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme;
+
     let header = Row::new(vec!["IID", "Title", "Author", "Branch", "Updated"])
-        .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
     let rows: Vec<Row> = app
@@ -145,18 +139,18 @@ fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|mr| {
             let status_color = match mr.state.as_str() {
-                "opened" => Color::Green,
-                "merged" => Color::Magenta,
-                "closed" => Color::Red,
-                _ => Color::Gray,
+                "opened" => t.success,
+                "merged" => t.highlight,
+                "closed" => t.error,
+                _ => t.border,
             };
 
             Row::new(vec![
                 Cell::from(format!("!{}", mr.iid)).style(Style::default().fg(status_color)),
-                Cell::from(mr.title.clone()).style(Style::default().fg(Color::White)),
-                Cell::from(format!("@{}", mr.author.username)).style(Style::default().fg(Color::Yellow)),
-                Cell::from(mr.source_branch.clone()).style(Style::default().fg(Color::Blue)),
-                Cell::from(mr.updated_at[..10].to_string()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(mr.title.clone()).style(Style::default().fg(t.text)),
+                Cell::from(format!("@{}", mr.author.username)).style(Style::default().fg(t.warning)),
+                Cell::from(mr.source_branch.clone()).style(Style::default().fg(t.info)),
+                Cell::from(mr.updated_at[..10].to_string()).style(Style::default().fg(t.text_dim)),
             ])
         })
         .collect();
@@ -176,17 +170,17 @@ fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(" Merge Requests ")
-            .title_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(t.border)),
     );
 
     frame.render_widget(table, area);
 }
 
 fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme;
+
     let header = Row::new(vec!["ID", "Status", "Branch", "URL"])
-        .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
     let rows: Vec<Row> = app
@@ -194,19 +188,19 @@ fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|p| {
             let (status_icon, status_color) = match p.status.as_str() {
-                "success" => ("✓", Color::Green),
-                "failed" => ("✗", Color::Red),
-                "running" => ("●", Color::Yellow),
-                "canceled" => ("○", Color::DarkGray),
-                "pending" => ("◌", Color::Blue),
-                _ => ("?", Color::Gray),
+                "success" => ("✓", t.success),
+                "failed" => ("✗", t.error),
+                "running" => ("●", t.warning),
+                "canceled" => ("○", t.text_dim),
+                "pending" => ("◌", t.info),
+                _ => ("?", t.border),
             };
 
             Row::new(vec![
-                Cell::from(format!("#{}", p.id)).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(format!("#{}", p.id)).style(Style::default().fg(t.text_dim)),
                 Cell::from(format!("{} {}", status_icon, p.status)).style(Style::default().fg(status_color)),
-                Cell::from(p.r#ref.clone()).style(Style::default().fg(Color::Blue)),
-                Cell::from(p.web_url.clone()).style(Style::default().fg(Color::DarkGray)),
+                Cell::from(p.r#ref.clone()).style(Style::default().fg(t.info)),
+                Cell::from(p.web_url.clone()).style(Style::default().fg(t.text_dim)),
             ])
         })
         .collect();
@@ -225,15 +219,15 @@ fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(" Pipelines ")
-            .title_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(t.border)),
     );
 
     frame.render_widget(table, area);
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {
+    let t = app.theme;
+
     let dropdown_x = header_area.x;
     let dropdown_width = 40u16.min(header_area.width);
     let dropdown_height = (app.projects.len() as u16 + 2).min(10);
@@ -253,9 +247,9 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
         .enumerate()
         .map(|(i, p)| {
             let style = if i == app.selected_project {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(t.text)
             };
             let prefix = if i == app.selected_project { "▸ " } else { "  " };
             ListItem::new(format!("{}{}", prefix, p.path_with_namespace)).style(style)
@@ -266,9 +260,9 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(t.accent))
             .title(" Select Project ")
-            .title_style(Style::default().fg(Color::Cyan)),
+            .title_style(Style::default().fg(t.accent)),
     );
 
     frame.render_widget(list, dropdown_area);
@@ -283,16 +277,18 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
         .collect();
 }
 
-fn render_footer(frame: &mut Frame, area: Rect) {
+fn render_footer(frame: &mut Frame, t: &Theme, area: Rect) {
     let hints = vec![
-        Span::styled(" q", Style::default().fg(Color::Cyan)),
-        Span::styled(" quit ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" Tab", Style::default().fg(Color::Cyan)),
-        Span::styled(" switch tab ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" p", Style::default().fg(Color::Cyan)),
-        Span::styled(" project ", Style::default().fg(Color::DarkGray)),
-        Span::styled(" 1/2", Style::default().fg(Color::Cyan)),
-        Span::styled(" tabs", Style::default().fg(Color::DarkGray)),
+        Span::styled(" q", Style::default().fg(t.accent)),
+        Span::styled(" quit ", Style::default().fg(t.text_dim)),
+        Span::styled(" Tab", Style::default().fg(t.accent)),
+        Span::styled(" switch tab ", Style::default().fg(t.text_dim)),
+        Span::styled(" p", Style::default().fg(t.accent)),
+        Span::styled(" project ", Style::default().fg(t.text_dim)),
+        Span::styled(" 1/2", Style::default().fg(t.accent)),
+        Span::styled(" tabs ", Style::default().fg(t.text_dim)),
+        Span::styled(" ,", Style::default().fg(t.accent)),
+        Span::styled(" settings", Style::default().fg(t.text_dim)),
     ];
 
     let footer = Paragraph::new(Line::from(hints));

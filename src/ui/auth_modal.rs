@@ -20,6 +20,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
+    let t = app.theme;
     let area = centered_rect(50, 35, frame.area());
 
     frame.render_widget(Clear, area);
@@ -29,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(t.accent));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -44,7 +45,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     .split(inner);
 
     let label = Paragraph::new("GitLab Personal Access Token:")
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(t.text));
     frame.render_widget(label, chunks[0]);
 
     let masked: String = "●".repeat(app.token_input.len());
@@ -55,19 +56,19 @@ pub fn render(frame: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Gray)),
+                .border_style(Style::default().fg(t.border)),
         )
-        .style(Style::default().fg(Color::Yellow));
+        .style(Style::default().fg(t.warning));
     frame.render_widget(input, chunks[1]);
 
     if let Some(ref warning) = app.token_source_warning {
         let warn = Paragraph::new(warning.as_str())
-            .style(Style::default().fg(Color::Yellow))
+            .style(Style::default().fg(t.warning))
             .wrap(Wrap { trim: true });
         frame.render_widget(warn, chunks[2]);
     } else if let Some(ref error) = app.auth_error {
         let err = Paragraph::new(error.as_str())
-            .style(Style::default().fg(Color::Red))
+            .style(Style::default().fg(t.error))
             .wrap(Wrap { trim: true });
         frame.render_widget(err, chunks[2]);
     }
@@ -78,7 +79,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         "[Enter] Submit  [Esc] Quit"
     };
     let footer = Paragraph::new(footer_text)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(t.text_dim))
         .alignment(Alignment::Center);
     frame.render_widget(footer, chunks[4]);
 }
