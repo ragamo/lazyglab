@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table};
 
-use crate::app::{App, Tab};
+use crate::app::{App, MrFilter, Tab};
 use crate::theme::Theme;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -120,15 +120,25 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     app.tab_pipelines_area = Some(tabs_layout[1]);
 }
 
-fn render_content(frame: &mut Frame, app: &App, area: Rect) {
+fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
         Tab::MergeRequests => render_merge_requests(frame, app, area),
         Tab::Pipelines => render_pipelines(frame, app, area),
     }
 }
 
-fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
+fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    render_mr_filters(frame, app, chunks[0]);
+
+    let content_area = chunks[1];
 
     let header = Row::new(vec!["IID", "Title", "Author", "Branch", "Updated"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
@@ -137,6 +147,7 @@ fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
     let rows: Vec<Row> = app
         .merge_requests
         .iter()
+        .filter(|mr| app.mr_filter.matches(&mr.state))
         .map(|mr| {
             let status_color = match mr.state.as_str() {
                 "opened" => t.success,
@@ -173,7 +184,43 @@ fn render_merge_requests(frame: &mut Frame, app: &App, area: Rect) {
             .border_style(Style::default().fg(t.border)),
     );
 
-    frame.render_widget(table, area);
+    frame.render_widget(table, content_area);
+}
+
+fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let mut filter_areas = Vec::new();
+    let mut x_offset = area.x;
+
+    let spans: Vec<Span> = MrFilter::ALL_FILTERS
+        .iter()
+        .flat_map(|f| {
+            let style = if *f == app.mr_filter {
+                Style::default().fg(t.bg).bg(t.accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.text_dim)
+            };
+            let label = format!(" {} ", f.label());
+            let width = label.len() as u16;
+            filter_areas.push(Rect {
+                x: x_offset,
+                y: area.y,
+                width,
+                height: 1,
+            });
+            x_offset += width + 1;
+            vec![
+                Span::styled(label, style),
+                Span::raw(" "),
+            ]
+        })
+        .collect();
+
+    app.mr_filter_areas = filter_areas;
+
+    let paragraph = Paragraph::new(Line::from(spans));
+    frame.render_widget(paragraph, area);
 }
 
 fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {

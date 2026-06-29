@@ -23,6 +23,42 @@ pub enum Tab {
     Pipelines,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum MrFilter {
+    #[default]
+    Open,
+    Merged,
+    Closed,
+    All,
+}
+
+impl MrFilter {
+    pub const ALL_FILTERS: &[MrFilter] = &[
+        MrFilter::Open,
+        MrFilter::Merged,
+        MrFilter::Closed,
+        MrFilter::All,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            MrFilter::Open => "Open",
+            MrFilter::Merged => "Merged",
+            MrFilter::Closed => "Closed",
+            MrFilter::All => "All",
+        }
+    }
+
+    pub fn matches(&self, state: &str) -> bool {
+        match self {
+            MrFilter::Open => state == "opened",
+            MrFilter::Merged => state == "merged",
+            MrFilter::Closed => state == "closed",
+            MrFilter::All => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     pub id: u64,
@@ -50,6 +86,7 @@ pub struct App {
     pub pipelines: Vec<Pipeline>,
 
     pub active_tab: Tab,
+    pub mr_filter: MrFilter,
     pub projects: Vec<Project>,
     pub selected_project: usize,
     pub project_selector_open: bool,
@@ -73,6 +110,7 @@ pub struct App {
     pub tab_pipelines_area: Option<ratatui::prelude::Rect>,
     pub project_selector_area: Option<ratatui::prelude::Rect>,
     pub project_items_areas: Vec<ratatui::prelude::Rect>,
+    pub mr_filter_areas: Vec<ratatui::prelude::Rect>,
 }
 
 impl App {
@@ -106,9 +144,23 @@ impl App {
             MergeRequest {
                 id: 103, iid: 40, title: "refactor: extract provider trait".into(),
                 author: User { id: 1, username: "ragamo".into(), name: "Christian".into() },
-                state: "opened".into(), source_branch: "refactor/provider-trait".into(),
+                state: "merged".into(), source_branch: "refactor/provider-trait".into(),
                 target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/40".into(),
                 created_at: "2026-06-25T09:00:00Z".into(), updated_at: "2026-06-26T11:00:00Z".into(),
+            },
+            MergeRequest {
+                id: 104, iid: 39, title: "chore: update CI config".into(),
+                author: User { id: 2, username: "alice".into(), name: "Alice Dev".into() },
+                state: "merged".into(), source_branch: "chore/ci-update".into(),
+                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/39".into(),
+                created_at: "2026-06-20T08:00:00Z".into(), updated_at: "2026-06-21T10:00:00Z".into(),
+            },
+            MergeRequest {
+                id: 105, iid: 38, title: "feat: initial splash screen".into(),
+                author: User { id: 1, username: "ragamo".into(), name: "Christian".into() },
+                state: "closed".into(), source_branch: "feat/splash-v1".into(),
+                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/38".into(),
+                created_at: "2026-06-18T12:00:00Z".into(), updated_at: "2026-06-19T09:00:00Z".into(),
             },
         ];
 
@@ -144,6 +196,7 @@ impl App {
             merge_requests: mock_mrs,
             pipelines: mock_pipelines,
             active_tab: Tab::default(),
+            mr_filter: MrFilter::default(),
             projects: mock_projects,
             selected_project: 0,
             project_selector_open: false,
@@ -161,6 +214,7 @@ impl App {
             tab_pipelines_area: None,
             project_selector_area: None,
             project_items_areas: Vec::new(),
+            mr_filter_areas: Vec::new(),
         };
 
         app.try_auto_auth();
@@ -273,6 +327,12 @@ impl App {
                                 Tab::Pipelines => Tab::MergeRequests,
                             };
                         }
+                        KeyCode::Left if self.active_tab == Tab::MergeRequests => {
+                            self.cycle_mr_filter_back();
+                        }
+                        KeyCode::Right if self.active_tab == Tab::MergeRequests => {
+                            self.cycle_mr_filter_forward();
+                        }
                         KeyCode::Char('p') => self.project_selector_open = true,
                         KeyCode::Char(',') => self.settings_open = true,
                         _ => {}
@@ -280,6 +340,18 @@ impl App {
                 }
             }
         }
+    }
+
+    fn cycle_mr_filter_forward(&mut self) {
+        let filters = MrFilter::ALL_FILTERS;
+        let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
+        self.mr_filter = filters[(idx + 1) % filters.len()].clone();
+    }
+
+    fn cycle_mr_filter_back(&mut self) {
+        let filters = MrFilter::ALL_FILTERS;
+        let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
+        self.mr_filter = filters[(idx + filters.len() - 1) % filters.len()].clone();
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -378,6 +450,16 @@ impl App {
         if let Some(area) = self.tab_pipelines_area {
             if hit(pos, area) {
                 self.active_tab = Tab::Pipelines;
+                return;
+            }
+        }
+
+        for (i, area) in self.mr_filter_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
+                    self.mr_filter = f.clone();
+                }
+                return;
             }
         }
     }
