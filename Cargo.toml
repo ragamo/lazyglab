@@ -1,0 +1,10 @@
+[package]
+name = "lazyglab"
+version = "0.1.0"
+edition = "2024"
+description = "A TUI wrapper for GitLab and GitHub — PRs, pipelines, and more"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+color-eyre = "0.6"
