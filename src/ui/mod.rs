@@ -6,7 +6,7 @@ use ratatui::prelude::*;
 
 use crate::app::App;
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     match app.screen {
         crate::app::AppScreen::Splash => splash::render(frame),
         crate::app::AppScreen::AuthModal => {

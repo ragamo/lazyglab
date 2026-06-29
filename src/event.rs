@@ -15,7 +15,8 @@ pub async fn run_event_loop(
     let mut event_stream = EventStream::new();
 
     loop {
-        terminal.draw(|frame| ui::render(frame, app))?;
+        let app_ref = &mut *app;
+        terminal.draw(|frame| ui::render(frame, app_ref))?;
 
         if app.should_quit {
             break;
