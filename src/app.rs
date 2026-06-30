@@ -161,7 +161,7 @@ pub struct App {
     // Settings modal
     pub settings_open: bool,
     pub settings_selected: usize,
-    pub theme_selector_open: bool,
+    pub settings_tab_areas: Vec<ratatui::prelude::Rect>,
     pub theme_selected: usize,
     pub theme_confirmed: usize,
     pub theme: &'static Theme,
@@ -257,7 +257,7 @@ impl App {
             http_client,
             settings_open: false,
             settings_selected: 0,
-            theme_selector_open: false,
+            settings_tab_areas: Vec::new(),
             theme_selected,
             theme_confirmed: theme_selected,
             theme: active_theme,
@@ -579,53 +579,39 @@ impl App {
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
-        if self.theme_selector_open {
-            match key.code {
-                KeyCode::Esc => {
-                    self.theme = theme::ALL_THEMES[self.theme_confirmed];
-                    self.theme_selected = self.theme_confirmed;
-                    self.theme_selector_open = false;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if self.theme_selected > 0 {
-                        self.theme_selected -= 1;
-                        self.theme = theme::ALL_THEMES[self.theme_selected];
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if self.theme_selected < theme::ALL_THEMES.len().saturating_sub(1) {
-                        self.theme_selected += 1;
-                        self.theme = theme::ALL_THEMES[self.theme_selected];
-                    }
-                }
-                KeyCode::Enter => {
-                    self.theme_confirmed = self.theme_selected;
-                    self.config.ui.theme = Some(self.theme.name.to_string());
-                    let _ = config::save_config(&self.config);
-                    self.theme_selector_open = false;
-                    self.settings_open = false;
-                }
-                _ => {}
+        const NUM_TABS: usize = 2;
+        match key.code {
+            KeyCode::Esc => {
+                // Cancel: revert theme preview to confirmed
+                self.theme = theme::ALL_THEMES[self.theme_confirmed];
+                self.theme_selected = self.theme_confirmed;
+                self.settings_open = false;
             }
-        } else {
-            match key.code {
-                KeyCode::Esc => self.settings_open = false,
-                KeyCode::Up | KeyCode::Char('k') => {
-                    if self.settings_selected > 0 {
-                        self.settings_selected -= 1;
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    // Only 1 item for now
-                    let _ = self.settings_selected;
-                }
-                KeyCode::Enter => {
-                    if self.settings_selected == 0 {
-                        self.theme_selector_open = true;
-                    }
-                }
-                _ => {}
+            KeyCode::Tab | KeyCode::Right => {
+                self.settings_selected = (self.settings_selected + 1) % NUM_TABS;
             }
+            KeyCode::BackTab | KeyCode::Left => {
+                self.settings_selected = (self.settings_selected + NUM_TABS - 1) % NUM_TABS;
+            }
+            KeyCode::Up | KeyCode::Char('k') if self.settings_selected == 0 => {
+                if self.theme_selected > 0 {
+                    self.theme_selected -= 1;
+                    self.theme = theme::ALL_THEMES[self.theme_selected];
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.settings_selected == 0 => {
+                if self.theme_selected < theme::ALL_THEMES.len().saturating_sub(1) {
+                    self.theme_selected += 1;
+                    self.theme = theme::ALL_THEMES[self.theme_selected];
+                }
+            }
+            KeyCode::Enter => {
+                self.theme_confirmed = self.theme_selected;
+                self.config.ui.theme = Some(self.theme.name.to_string());
+                let _ = config::save_config(&self.config);
+                self.settings_open = false;
+            }
+            _ => {}
         }
     }
 
@@ -801,8 +787,14 @@ impl App {
         // Click outside modal bounds — consume (don't pass through)
     }
 
-    fn handle_mouse_settings(&mut self, _pos: (u16, u16)) {
-        // Consume all clicks while settings is open (block pass-through)
+    fn handle_mouse_settings(&mut self, pos: (u16, u16)) {
+        for (i, area) in self.settings_tab_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                self.settings_selected = i;
+                return;
+            }
+        }
+        // Consume all other clicks (block pass-through)
     }
 
     fn handle_mouse_detail(&mut self, pos: (u16, u16)) {
