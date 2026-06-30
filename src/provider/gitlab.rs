@@ -155,25 +155,7 @@ impl Provider for GitLabProvider {
             .send()
             .await?;
 
-        #[derive(serde::Deserialize)]
-        struct PipelineResponse {
-            id: u64,
-            status: String,
-            r#ref: String,
-            web_url: String,
-        }
-
-        let raw: Vec<PipelineResponse> = resp.error_for_status()?.json().await?;
-        let pipelines = raw
-            .into_iter()
-            .map(|p| Pipeline {
-                id: p.id,
-                status: p.status,
-                r#ref: p.r#ref,
-                web_url: p.web_url,
-            })
-            .collect();
-
+        let pipelines: Vec<Pipeline> = resp.error_for_status()?.json().await?;
         Ok(pipelines)
     }
 
@@ -268,6 +250,12 @@ impl Provider for GitLabProvider {
         ));
 
         #[derive(Deserialize)]
+        struct MrRefResp {
+            iid: u64,
+            title: String,
+        }
+
+        #[derive(Deserialize)]
         struct PipelineDetailResp {
             #[serde(default)]
             duration: Option<u64>,
@@ -275,6 +263,8 @@ impl Provider for GitLabProvider {
             user: Option<PipelineUser>,
             #[serde(default)]
             status: String,
+            #[serde(default)]
+            merge_request: Option<MrRefResp>,
         }
 
         let detail_resp = self
@@ -414,6 +404,7 @@ impl Provider for GitLabProvider {
             duration: detail.duration,
             user: detail.user,
             stages,
+            mr_ref: detail.merge_request.map(|mr| PipelineMrRef { iid: mr.iid, title: mr.title }),
         })
     }
 }

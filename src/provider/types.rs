@@ -49,12 +49,28 @@ pub struct MergeRequest {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Pipeline {
     pub id: u64,
     pub status: String,
     pub r#ref: String,
     pub web_url: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub user: Option<PipelineUser>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PipelineMrRef {
+    pub iid: u64,
+    pub title: String,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +131,7 @@ pub struct PipelineEnrichedData {
     pub duration: Option<u64>,
     pub user: Option<PipelineUser>,
     pub stages: Vec<StageStatus>,
+    pub mr_ref: Option<PipelineMrRef>,
 }
 
 #[derive(Debug, Clone)]

@@ -680,6 +680,8 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
             created_at: &pipeline.created_at,
             duration: enriched.and_then(|e| e.duration),
             user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
+            mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
+            mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
             stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
         };
         lines.extend(pipeline_card_lines(&view, t, area.width));
@@ -809,7 +811,7 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         .take(visible_rows)
         .collect();
 
-    let header = Row::new(vec!["ID", "Status", "Branch", "URL"])
+    let header = Row::new(vec!["ID", "Status", "Branch", "Source", "Updated"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
@@ -829,11 +831,17 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                 _ => ("?", t.border),
             };
 
+            let source = p.source.as_deref().unwrap_or("");
+            let updated = p.updated_at.as_deref()
+                .or(Some(p.created_at.as_str()))
+                .and_then(|s| s.get(..10))
+                .unwrap_or("");
             let row = Row::new(vec![
-                Cell::from(format!("#{}", p.id)).style(Style::default().fg(t.text_dim)),
+                Cell::from(format!("#{}", p.id)).style(Style::default().fg(t.accent)),
                 Cell::from(format!("{} {}", status_icon, p.status)).style(Style::default().fg(status_color)),
                 Cell::from(p.r#ref.clone()).style(Style::default().fg(t.info)),
-                Cell::from(p.web_url.clone()).style(Style::default().fg(t.text_dim)),
+                Cell::from(source.to_string()).style(Style::default().fg(t.text_dim)),
+                Cell::from(updated.to_string()).style(Style::default().fg(t.text_dim)),
             ]);
 
             if is_selected {
@@ -853,10 +861,11 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(7),
-            Constraint::Length(12),
-            Constraint::Length(25),
-            Constraint::Min(30),
+            Constraint::Length(10),  // #ID
+            Constraint::Length(12),  // Status
+            Constraint::Min(20),     // Branch
+            Constraint::Length(25),  // Source
+            Constraint::Length(12),  // Updated
         ],
     )
     .header(header)
@@ -966,15 +975,15 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Use a dummy created_at since Pipeline doesn't have it — show basic info
-    let created_at = enriched.is_some().then_some("").unwrap_or("");
     let view = PipelineView {
         id: pipeline.id,
         status: &pipeline.status,
         r#ref: &pipeline.r#ref,
-        created_at,
+        created_at: &pipeline.created_at,
         duration: enriched.and_then(|e| e.duration),
         user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
+        mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
+        mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
         stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
     };
 

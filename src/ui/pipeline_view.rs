@@ -10,6 +10,8 @@ pub struct PipelineView<'a> {
     pub created_at: &'a str,
     pub duration: Option<u64>,
     pub user: Option<&'a str>,
+    pub mr_iid: Option<u64>,
+    pub mr_title: Option<&'a str>,
     pub stages: &'a [StageStatus],
 }
 
@@ -44,13 +46,19 @@ pub fn pipeline_card_lines<'a>(p: &PipelineView<'_>, t: &'a Theme, area_width: u
     let user_str = p.user
         .map(|u| format!("@{}", u))
         .unwrap_or_else(|| "…".to_string());
-    lines.push(Line::from(vec![
+    let mut id_line = vec![
         Span::styled(format!("#{}", p.id), Style::default().fg(t.accent)),
         Span::styled(" — ", Style::default().fg(t.text_dim)),
         Span::styled(p.r#ref.to_string(), Style::default().fg(t.info)),
         Span::styled(" by ", Style::default().fg(t.text_dim)),
         Span::styled(user_str, Style::default().fg(t.warning)),
-    ]));
+    ];
+    if let (Some(iid), Some(title)) = (p.mr_iid, p.mr_title) {
+        id_line.push(Span::styled("  │  ", Style::default().fg(t.text_dim)));
+        id_line.push(Span::styled(format!("!{}", iid), Style::default().fg(t.accent)));
+        id_line.push(Span::styled(format!(" {}", title), Style::default().fg(t.text)));
+    }
+    lines.push(Line::from(id_line));
 
     // Stages with jobs
     if !p.stages.is_empty() {
