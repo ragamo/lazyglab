@@ -2,7 +2,7 @@
 
 A terminal UI (TUI) for GitLab and GitHub — browse merge requests and pipeline statuses without leaving your terminal.
 
-Built with [ratatui](https://ratatui.rs) and Rust. Mouse-first interaction.
+Built with Rust. Mouse-first interaction. Heavily influenced by [herdr](https://herdr.dev/).
 
 ## Features
 

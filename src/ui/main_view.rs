@@ -325,10 +325,18 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
         String::new()
     };
 
+    // IID column width: fit the longest "!<iid>" across all filtered MRs (min 6)
+    let iid_width = filtered
+        .iter()
+        .map(|mr| 1 + mr.iid.to_string().len())
+        .max()
+        .unwrap_or(6)
+        .max(6) as u16;
+
     let table = Table::new(
         rows,
         [
-            Constraint::Length(6),
+            Constraint::Length(iid_width),
             Constraint::Min(30),
             Constraint::Length(15),
             Constraint::Length(22),
@@ -1012,6 +1020,17 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+// Days since 1970-01-01 for a civil (proleptic Gregorian) date.
+// Howard Hinnant's algorithm; correct across leap years.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146097 + doe - 719468
+}
+
 fn format_time_ago(date_str: &str) -> String {
     let date_part = &date_str[..10]; // "YYYY-MM-DD"
     let parts: Vec<&str> = date_part.split('-').collect();
@@ -1020,8 +1039,8 @@ fn format_time_ago(date_str: &str) -> String {
         (Ok(y), Ok(m), Ok(d)) => (y, m, d),
         _ => return date_part.to_string(),
     };
-    // Approximate days since epoch for comparison
-    let date_days = y * 365 + m * 30 + d;
+    // Real days since the Unix epoch (1970-01-01), accounting for leap years
+    let date_days = days_from_civil(y, m, d);
     let now_days = {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1029,9 +1048,7 @@ fn format_time_ago(date_str: &str) -> String {
             .as_secs();
         (now / 86400) as i64
     };
-    // Convert epoch days from 1970 base to same scale
-    let epoch_offset = 1970 * 365 + 1 * 30 + 1;
-    let diff = now_days - (date_days - epoch_offset);
+    let diff = now_days - date_days;
     if diff < 0 {
         date_part.to_string()
     } else if diff == 0 {
@@ -1175,10 +1192,18 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         String::new()
     };
 
+    // ID column width: fit the longest "#<id>" across all pipelines (min 10)
+    let id_width = app.pipelines
+        .iter()
+        .map(|p| 1 + p.id.to_string().len())
+        .max()
+        .unwrap_or(10)
+        .max(10) as u16;
+
     let table = Table::new(
         rows,
         [
-            Constraint::Length(10),  // #ID
+            Constraint::Length(id_width),  // #ID
             Constraint::Length(12),  // Status
             Constraint::Min(20),     // Branch
             Constraint::Length(25),  // Source
