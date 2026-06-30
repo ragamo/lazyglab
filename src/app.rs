@@ -136,6 +136,12 @@ pub struct App {
     pub find_link_area: Option<ratatui::prelude::Rect>,
     pub find_result_areas: Vec<ratatui::prelude::Rect>,
     pub find_star_areas: Vec<ratatui::prelude::Rect>,
+    pub mr_row_areas: Vec<ratatui::prelude::Rect>,
+    pub selected_mr_index: Option<usize>,
+    pub mr_detail_close_area: Option<ratatui::prelude::Rect>,
+    pub mr_detail_height: u16,
+    pub mr_detail_resize_area: Option<ratatui::prelude::Rect>,
+    pub mr_detail_dragging: bool,
 }
 
 impl App {
@@ -209,6 +215,12 @@ impl App {
             find_link_area: None,
             find_result_areas: Vec::new(),
             find_star_areas: Vec::new(),
+            mr_row_areas: Vec::new(),
+            selected_mr_index: None,
+            mr_detail_close_area: None,
+            mr_detail_height: 0,
+            mr_detail_resize_area: None,
+            mr_detail_dragging: false,
         };
 
         app.try_auto_auth();
@@ -318,6 +330,9 @@ impl App {
                     }
                 } else {
                     match key.code {
+                        KeyCode::Esc if self.selected_mr_index.is_some() => {
+                            self.selected_mr_index = None;
+                        }
                         KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
                         KeyCode::Char('1') => self.active_tab = Tab::MergeRequests,
                         KeyCode::Char('2') => self.active_tab = Tab::Pipelines,
@@ -477,11 +492,33 @@ impl App {
             return;
         }
 
-        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        let pos = (mouse.column, mouse.row);
+
+        // Handle drag-to-resize
+        if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
+            if self.mr_detail_dragging {
+                // The resize bar is at the top of the detail panel.
+                // pos.row is where the mouse is — that becomes the new split point.
+                // detail_height = total_content_height - pos.row + content_start
+                // We store height directly from the mouse row relative to the screen.
+                let content_start = 5u16; // header(3) + tabs(1) + filters(1)
+                let screen_height = self.mr_detail_resize_area
+                    .map(|a| a.y + self.mr_detail_height)
+                    .unwrap_or(24);
+                let new_height = screen_height.saturating_sub(pos.1);
+                self.mr_detail_height = new_height.max(8).min(screen_height.saturating_sub(content_start + 4));
+            }
             return;
         }
 
-        let pos = (mouse.column, mouse.row);
+        if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+            self.mr_detail_dragging = false;
+            return;
+        }
+
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return;
+        }
 
         if self.project_selector_open {
             for (i, area) in self.project_items_areas.iter().enumerate() {
@@ -547,6 +584,33 @@ impl App {
                     self.mr_filter = f.clone();
                 }
                 return;
+            }
+        }
+
+        if let Some(area) = self.mr_detail_close_area {
+            if hit(pos, area) {
+                self.selected_mr_index = None;
+                return;
+            }
+        }
+
+        if let Some(area) = self.mr_detail_resize_area {
+            if hit(pos, area) {
+                self.mr_detail_dragging = true;
+                return;
+            }
+        }
+
+        if self.active_tab == Tab::MergeRequests {
+            for (i, area) in self.mr_row_areas.iter().enumerate() {
+                if hit(pos, *area) {
+                    self.selected_mr_index = if self.selected_mr_index == Some(i) {
+                        None
+                    } else {
+                        Some(i)
+                    };
+                    return;
+                }
             }
         }
 

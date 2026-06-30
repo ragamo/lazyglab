@@ -168,8 +168,36 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
-        Tab::MergeRequests => render_merge_requests(frame, app, area),
-        Tab::Pipelines => render_pipelines(frame, app, area),  // already &mut App
+        Tab::MergeRequests => {
+            if app.selected_mr_index.is_some() {
+                // Init height on first open
+                if app.mr_detail_height == 0 {
+                    app.mr_detail_height = (area.height / 2 + 2).max(14);
+                }
+                let detail_height = app.mr_detail_height.min(area.height.saturating_sub(6));
+                let table_height = area.height.saturating_sub(detail_height);
+                let splits = Layout::vertical([
+                    Constraint::Length(table_height),
+                    Constraint::Length(detail_height),
+                ])
+                .split(area);
+                render_merge_requests(frame, app, splits[0]);
+                render_mr_detail(frame, app, splits[1]);
+
+                // Extend resize area to also cover the bottom border of the table
+                let table_bottom_row = splits[0].y + splits[0].height.saturating_sub(1);
+                app.mr_detail_resize_area = Some(Rect {
+                    x: splits[1].x,
+                    y: table_bottom_row,
+                    width: splits[1].width,
+                    height: 2, // bottom border of table + top border of detail
+                });
+            } else {
+                app.mr_detail_height = 0;
+                render_merge_requests(frame, app, area);
+            }
+        }
+        Tab::Pipelines => render_pipelines(frame, app, area),
     }
 }
 
@@ -268,6 +296,119 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
     );
 
     frame.render_widget(table, content_area);
+
+    // Register click areas for each visible row (skip header + margin)
+    let row_start_y = content_area.y + 3; // border + header + margin
+    app.mr_row_areas = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, _)| Rect {
+            x: content_area.x + 1,
+            y: row_start_y + i as u16,
+            width: content_area.width.saturating_sub(2),
+            height: 1,
+        })
+        .collect();
+}
+
+fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let filtered: Vec<&_> = app
+        .merge_requests
+        .iter()
+        .filter(|mr| app.mr_filter.matches(&mr.state))
+        .collect();
+
+    let mr = match app.selected_mr_index.and_then(|i| filtered.get(i)) {
+        Some(mr) => *mr,
+        None => return,
+    };
+
+    let panel_area = area;
+
+    // The top border row of the panel is the drag target
+    app.mr_detail_resize_area = Some(Rect {
+        x: panel_area.x,
+        y: panel_area.y,
+        width: panel_area.width,
+        height: 1,
+    });
+
+    let border_style = if app.mr_detail_dragging {
+        Style::default().fg(t.accent)
+    } else {
+        Style::default().fg(t.accent)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(border_style);
+
+    let inner = block.inner(panel_area);
+    frame.render_widget(block, panel_area);
+
+    // [X] close button — top-right corner of the block border
+    let close_area = Rect {
+        x: area.x + area.width.saturating_sub(4),
+        y: area.y,
+        width: 3,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled("[X]", Style::default().fg(t.text_dim))),
+        close_area,
+    );
+    app.mr_detail_close_area = Some(close_area);
+
+    let status_color = match mr.state.as_str() {
+        "opened" => t.success,
+        "merged" => t.highlight,
+        "closed" => t.error,
+        _ => t.border,
+    };
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(format!("!{}", mr.iid), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled("  ", Style::default()),
+            Span::styled(mr.title.clone(), Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("author   ", Style::default().fg(t.text_dim)),
+            Span::styled(format!("@{}", mr.author.username), Style::default().fg(t.warning)),
+        ]),
+        Line::from(vec![
+            Span::styled("state    ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.state.clone(), Style::default().fg(status_color)),
+        ]),
+        Line::from(vec![
+            Span::styled("from     ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.source_branch.clone(), Style::default().fg(t.info)),
+        ]),
+        Line::from(vec![
+            Span::styled("into     ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.target_branch.clone(), Style::default().fg(t.info)),
+        ]),
+        Line::from(vec![
+            Span::styled("updated  ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.updated_at[..10].to_string(), Style::default().fg(t.text)),
+        ]),
+        Line::from(vec![
+            Span::styled("created  ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.created_at[..10].to_string(), Style::default().fg(t.text)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("url      ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.web_url.clone(), Style::default().fg(t.accent)),
+        ]),
+    ];
+
+    let detail = Paragraph::new(lines);
+    frame.render_widget(detail, inner);
 }
 
 fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {
