@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::prelude::Rect;
 use tokio::sync::mpsc;
 
 use crate::auth::{self, TokenSource};
@@ -119,6 +120,7 @@ pub enum AppMessage {
     MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
     PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
     PipelineDetailEnrichedLoaded(Result<PipelineEnrichedData, ProviderError>),
+    JobLogLoaded(Result<String, ProviderError>),
     Tick,
 }
 
@@ -190,6 +192,13 @@ pub struct App {
     pub pipeline_detail_enriched: Option<PipelineEnrichedData>,
     pub pipeline_detail_loading: bool,
     pub pipeline_detail_scroll: u16,
+
+    // Job log panel
+    pub job_log_open: bool,
+    pub job_log_loading: bool,
+    pub job_log: String,
+    pub job_log_scroll: u16,
+    pub selected_job_id: Option<u64>,
 
     // Click areas (grouped by region)
     pub click_regions: ClickRegions,
@@ -273,6 +282,11 @@ impl App {
             pipeline_detail_enriched: None,
             pipeline_detail_loading: false,
             pipeline_detail_scroll: 0,
+            job_log_open: false,
+            job_log_loading: false,
+            job_log: String::new(),
+            job_log_scroll: 0,
+            selected_job_id: None,
             click_regions: ClickRegions::default(),
         };
 
@@ -661,7 +675,11 @@ impl App {
                 if self.pipeline_detail_open && self.active_tab == Tab::Pipelines {
                     if let Some(bounds) = self.click_regions.pipeline_detail.bounds {
                         if hit(pos, bounds) {
-                            self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_add(3);
+                            if self.job_log_open && pos.0 > bounds.x + bounds.width / 2 {
+                                self.job_log_scroll = self.job_log_scroll.saturating_add(3);
+                            } else {
+                                self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_add(3);
+                            }
                             return;
                         }
                     }
@@ -692,7 +710,11 @@ impl App {
                 if self.pipeline_detail_open && self.active_tab == Tab::Pipelines {
                     if let Some(bounds) = self.click_regions.pipeline_detail.bounds {
                         if hit(pos, bounds) {
-                            self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_sub(3);
+                            if self.job_log_open && pos.0 > bounds.x + bounds.width / 2 {
+                                self.job_log_scroll = self.job_log_scroll.saturating_sub(3);
+                            } else {
+                                self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_sub(3);
+                            }
                             return;
                         }
                     }
@@ -889,7 +911,24 @@ impl App {
             if let Some(area) = self.click_regions.pipeline_detail.close {
                 if hit(pos, area) {
                     self.pipeline_detail_open = false;
+                    self.job_log_open = false;
                     return;
+                }
+            }
+
+            // Job click areas
+            if self.pipeline_detail_open {
+                let job_areas: Vec<(Rect, u64)> = self.click_regions.pipeline_detail.job_areas.clone();
+                for (area, job_id) in job_areas {
+                    if hit(pos, area) {
+                        if self.selected_job_id == Some(job_id) && self.job_log_open {
+                            self.job_log_open = false;
+                            self.selected_job_id = None;
+                        } else {
+                            self.load_job_log(job_id);
+                        }
+                        return;
+                    }
                 }
             }
 
@@ -1017,6 +1056,14 @@ impl App {
             AppMessage::PipelineDetailEnrichedLoaded(Err(_)) => {
                 self.pipeline_detail_loading = false;
             }
+            AppMessage::JobLogLoaded(Ok(log)) => {
+                self.job_log = log;
+                self.job_log_loading = false;
+            }
+            AppMessage::JobLogLoaded(Err(_)) => {
+                self.job_log = "Failed to load log.".to_string();
+                self.job_log_loading = false;
+            }
             AppMessage::Tick => {}
         }
     }
@@ -1060,6 +1107,28 @@ impl App {
             let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
             let result = provider.get_pipeline_enriched(pipeline_id).await;
             let _ = tx.send(AppMessage::PipelineDetailEnrichedLoaded(result));
+        });
+    }
+
+    pub fn load_job_log(&mut self, job_id: u64) {
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        self.selected_job_id = Some(job_id);
+        self.job_log_open = true;
+        self.job_log_loading = true;
+        self.job_log.clear();
+        self.job_log_scroll = 0;
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.get_job_log(job_id).await;
+            let _ = tx.send(AppMessage::JobLogLoaded(result));
         });
     }
 

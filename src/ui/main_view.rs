@@ -962,10 +962,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.click_regions.pipeline_detail.bounds = Some(area);
     app.click_regions.pipeline_detail.close = Some(close_area);
-
-    // Content
-    let empty_stages = vec![];
-    let enriched = app.pipeline_detail_enriched.as_ref();
+    app.click_regions.pipeline_detail.job_areas.clear();
 
     if app.pipeline_detail_loading {
         frame.render_widget(
@@ -975,6 +972,21 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    // Split inner horizontally if job log is open
+    let (detail_area, log_area) = if app.job_log_open {
+        let splits = Layout::horizontal([
+            Constraint::Percentage(40),
+            Constraint::Percentage(60),
+        ]).split(inner);
+        (splits[0], Some(splits[1]))
+    } else {
+        (inner, None)
+    };
+
+    let empty_stages = vec![];
+    let enriched = app.pipeline_detail_enriched.as_ref();
+
+    // Header lines (status, id, ref, user, mr)
     let view = PipelineView {
         id: pipeline.id,
         status: &pipeline.status,
@@ -984,11 +996,178 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
         mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
         mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
-        stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
+        stages: &[],
     };
+    let header_lines = pipeline_card_lines(&view, t, detail_area.width);
+    let header_height = header_lines.len() as u16;
 
-    let lines = pipeline_card_lines(&view, t, inner.width);
-    render_scrollable_lines(frame, &mut app.pipeline_detail_scroll, lines, inner, t);
+    // Build stage/job lines with click area tracking
+    let stages = enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages);
+    let mut job_lines: Vec<Line> = Vec::new();
+    let mut job_areas: Vec<(Rect, u64)> = Vec::new();
+    let row_start = detail_area.y + header_height;
+    let scroll = app.pipeline_detail_scroll;
+
+    let mut line_idx: u16 = 0;
+    for stage in stages {
+        let (s_icon, s_color) = {
+            let (i, c) = match stage.status.as_str() {
+                "success" | "passed" => ("✓", t.success),
+                "failed" => ("✗", t.error),
+                "running" => ("●", t.warning),
+                "pending" => ("◌", t.info),
+                "canceled" | "skipped" => ("○", t.text_dim),
+                _ => ("?", t.border),
+            };
+            (i, c)
+        };
+        job_lines.push(Line::from(vec![
+            Span::styled(format!("  {} ", s_icon), Style::default().fg(s_color)),
+            Span::styled(stage.name.clone(), Style::default().fg(t.text)),
+        ]));
+        line_idx += 1;
+
+        for job in &stage.jobs {
+            let (j_icon, j_color) = match job.status.as_str() {
+                "success" | "passed" => ("✓", t.success),
+                "failed" => ("✗", t.error),
+                "running" => ("●", t.warning),
+                "pending" => ("◌", t.info),
+                "canceled" | "skipped" => ("○", t.text_dim),
+                _ => ("○", t.border),
+            };
+            let is_selected = app.selected_job_id == Some(job.id);
+            let is_bridge = !job.sub_jobs.is_empty();
+            let job_style = if is_selected {
+                Style::default().fg(t.bg).bg(t.accent)
+            } else if is_bridge {
+                Style::default().fg(t.text)
+            } else {
+                Style::default().fg(t.text_dim)
+            };
+            job_lines.push(Line::from(vec![
+                Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
+                Span::styled(job.name.clone(), job_style),
+            ]));
+
+            // Register click area (accounting for scroll)
+            let visible_row = (line_idx as i32) - (scroll as i32);
+            if visible_row >= 0 && (row_start + visible_row as u16) < detail_area.y + detail_area.height {
+                job_areas.push((Rect {
+                    x: detail_area.x,
+                    y: row_start + visible_row as u16,
+                    width: detail_area.width,
+                    height: 1,
+                }, job.id));
+            }
+            line_idx += 1;
+
+            for sub in &job.sub_jobs {
+                let (sj_icon, sj_color) = match sub.status.as_str() {
+                    "success" | "passed" => ("✓", t.success),
+                    "failed" => ("✗", t.error),
+                    "running" => ("●", t.warning),
+                    "pending" => ("◌", t.info),
+                    "canceled" | "skipped" => ("○", t.text_dim),
+                    _ => ("○", t.border),
+                };
+                let is_sel = app.selected_job_id == Some(sub.id);
+                let sub_style = if is_sel {
+                    Style::default().fg(t.bg).bg(t.accent)
+                } else {
+                    Style::default().fg(t.text_dim)
+                };
+                job_lines.push(Line::from(vec![
+                    Span::styled(format!("          {} ", sj_icon), Style::default().fg(sj_color)),
+                    Span::styled(sub.name.clone(), sub_style),
+                ]));
+                let visible_row = (line_idx as i32) - (scroll as i32);
+                if visible_row >= 0 && (row_start + visible_row as u16) < detail_area.y + detail_area.height {
+                    job_areas.push((Rect {
+                        x: detail_area.x,
+                        y: row_start + visible_row as u16,
+                        width: detail_area.width,
+                        height: 1,
+                    }, sub.id));
+                }
+                line_idx += 1;
+            }
+        }
+    }
+    app.click_regions.pipeline_detail.job_areas = job_areas;
+
+    // Render header + jobs as a combined scrollable paragraph
+    let mut all_lines = header_lines;
+    all_lines.extend(job_lines);
+    render_scrollable_lines(frame, &mut app.pipeline_detail_scroll, all_lines, detail_area, t);
+
+    // Render job log panel
+    if let Some(log_area) = log_area {
+        render_job_log(frame, app, log_area);
+    }
+}
+
+fn render_job_log(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(t.border))
+        .title(Span::styled(" log ", Style::default().fg(t.text_dim)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.job_log_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            inner,
+        );
+        return;
+    }
+
+    // Strip ANSI escape codes for clean display
+    let clean: String = strip_ansi(&app.job_log);
+    let lines: Vec<Line> = clean.lines()
+        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(t.text))))
+        .collect();
+
+    let content_height = lines.len() as u16;
+    let visible_height = inner.height;
+    let max_scroll = content_height.saturating_sub(visible_height);
+    if app.job_log_scroll > max_scroll {
+        app.job_log_scroll = max_scroll;
+    }
+
+    let para = Paragraph::new(lines).scroll((app.job_log_scroll, 0));
+    frame.render_widget(para, inner);
+
+    if content_height > visible_height {
+        let mut state = ScrollbarState::new(max_scroll as usize).position(app.job_log_scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None).end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let sb_area = Rect { x: area.x + area.width.saturating_sub(1), y: inner.y, width: 1, height: inner.height };
+        frame.render_stateful_widget(scrollbar, sb_area, &mut state);
+    }
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_escape = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' || c == 'K' || c == 'J' || c == 'H' || c == 'A' || c == 'B' || c == 'C' || c == 'D' {
+                in_escape = false;
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {

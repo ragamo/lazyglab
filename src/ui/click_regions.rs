@@ -50,6 +50,7 @@ pub struct MrDetailRegion {
 pub struct PipelineDetailRegion {
     pub bounds: Option<Rect>,
     pub close: Option<Rect>,
+    pub job_areas: Vec<(Rect, u64)>,  // (area, job_id)
 }
 
 #[derive(Default)]

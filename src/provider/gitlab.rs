@@ -285,6 +285,7 @@ impl Provider for GitLabProvider {
 
         #[derive(Deserialize, Clone)]
         struct Job {
+            id: u64,
             name: String,
             stage: String,
             status: String,
@@ -311,6 +312,7 @@ impl Provider for GitLabProvider {
 
         #[derive(Deserialize)]
         struct Bridge {
+            id: u64,
             name: String,
             stage: String,
             status: String,
@@ -354,18 +356,19 @@ impl Provider for GitLabProvider {
                         if let Ok(r) = child_resp {
                             if let Ok(child_jobs) = r.json::<Vec<Job>>().await {
                                 sub_jobs = child_jobs.into_iter().rev()
-                                    .map(|j| JobInfo { name: j.name, status: j.status, sub_jobs: Vec::new() })
+                                    .map(|j| JobInfo { id: j.id, name: j.name, status: j.status, sub_jobs: Vec::new() })
                                     .collect();
                             }
                         }
                     }
                     bridge_jobs.push(JobInfo {
+                        id: bridge.id,
                         name: bridge.name.clone(),
                         status: bridge.status.clone(),
                         sub_jobs,
                     });
                     // Add bridge as a regular job entry for stage grouping
-                    jobs.push(Job { name: bridge.name.clone(), stage: bridge.stage.clone(), status: bridge.status.clone() });
+                    jobs.push(Job { id: bridge.id, name: bridge.name.clone(), stage: bridge.stage.clone(), status: bridge.status.clone() });
                 }
             }
         }
@@ -377,7 +380,7 @@ impl Provider for GitLabProvider {
             let job_info = if let Some(bj) = bridge_jobs.iter().find(|b| b.name == job.name) {
                 bj.clone()
             } else {
-                JobInfo { name: job.name.clone(), status: job.status.clone(), sub_jobs: Vec::new() }
+                JobInfo { id: job.id, name: job.name.clone(), status: job.status.clone(), sub_jobs: Vec::new() }
             };
 
             if let Some(entry) = stage_map.iter_mut().find(|s| s.name == job.stage) {
@@ -406,6 +409,28 @@ impl Provider for GitLabProvider {
             stages,
             mr_ref: detail.merge_request.map(|mr| PipelineMrRef { iid: mr.iid, title: mr.title }),
         })
+    }
+
+    async fn get_job_log(&self, job_id: u64) -> ProviderResult<String> {
+        let url = self.api_url(&format!(
+            "/projects/{}/jobs/{}/trace",
+            self.encoded_project_id(),
+            job_id
+        ));
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(ProviderError::NotFound("Job log not found".into()));
+        }
+
+        let log = resp.error_for_status()?.text().await?;
+        Ok(log)
     }
 }
 
