@@ -23,7 +23,13 @@ Built with Rust. Mouse-first interaction. Heavily influenced by [herdr](https://
 
 ## Installation
 
-### Install script (recommended)
+### Homebrew (macOS / Linux)
+
+```bash
+brew install ragamo/tap/lazyglab
+```
+
+### Install script
 
 Downloads the prebuilt binary for your platform, verifies its checksum, and installs it to `~/.local/bin` — no sudo required:
 
@@ -34,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/ragamo/lazyglab/master/scripts/inst
 Make sure `~/.local/bin` is on your `PATH`. You can override the install location or pin a version:
 
 ```bash
-INSTALL_DIR=~/bin VERSION=v0.1.0 \
+INSTALL_DIR=~/bin VERSION=v0.1.1 \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/ragamo/lazyglab/master/scripts/install.sh)"
 ```
 
