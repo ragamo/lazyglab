@@ -180,14 +180,43 @@ impl Provider for GitLabProvider {
     }
 
     async fn search_projects(&self, query: &str) -> ProviderResult<Vec<ProjectInfo>> {
-        let url = self.api_url("/projects");
+        // Extract path from full URL (e.g. https://gitlab.com/group/project → group/project)
+        let path = if query.starts_with("http://") || query.starts_with("https://") {
+            query
+                .trim_end_matches('/')
+                .split('/')
+                .skip(3) // skip scheme + empty + host
+                .collect::<Vec<_>>()
+                .join("/")
+        } else {
+            query.to_string()
+        };
 
+        // If the query looks like a namespace path (contains /), try direct lookup first
+        if path.contains('/') {
+            let encoded = path.replace('/', "%2F");
+            let direct_url = self.api_url(&format!("/projects/{}", encoded));
+            let resp = self
+                .client
+                .get(&direct_url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .send()
+                .await?;
+            if resp.status().is_success() {
+                if let Ok(project) = resp.json::<ProjectInfo>().await {
+                    return Ok(vec![project]);
+                }
+            }
+        }
+
+        // Fall back to name/keyword search
+        let url = self.api_url("/projects");
         let resp = self
             .client
             .get(&url)
             .header("PRIVATE-TOKEN", &self.token)
             .query(&[
-                ("search", query),
+                ("search", path.as_str()),
                 ("per_page", "20"),
             ])
             .send()
