@@ -44,6 +44,7 @@ pub struct MrDetailRegion {
     pub close: Option<Rect>,
     pub resize: Option<Rect>,
     pub tab_areas: Vec<Rect>,
+    pub job_areas: Vec<(Rect, u64)>,
 }
 
 #[derive(Default)]

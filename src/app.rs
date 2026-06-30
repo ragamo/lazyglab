@@ -574,6 +574,8 @@ impl App {
         self.mr_nav.reset();
         self.mr_detail_full = None;
         self.mr_detail_tab = MrDetailTab::default();
+        self.job_log_open = false;
+        self.selected_job_id = None;
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -665,7 +667,14 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_add(3),
-                                MrDetailTab::Pipelines => self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_add(3),
+                                MrDetailTab::Pipelines => {
+                                    let mid = bounds.x + bounds.width * 2 / 5;
+                                    if self.job_log_open && pos.0 > mid {
+                                        self.job_log_scroll = self.job_log_scroll.saturating_add(3);
+                                    } else {
+                                        self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_add(3);
+                                    }
+                                }
                                 _ => {}
                             }
                             return;
@@ -700,7 +709,14 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_sub(3),
-                                MrDetailTab::Pipelines => self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_sub(3),
+                                MrDetailTab::Pipelines => {
+                                    let mid = bounds.x + bounds.width * 2 / 5;
+                                    if self.job_log_open && pos.0 > mid {
+                                        self.job_log_scroll = self.job_log_scroll.saturating_sub(3);
+                                    } else {
+                                        self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_sub(3);
+                                    }
+                                }
                                 _ => {}
                             }
                             return;
@@ -813,6 +829,22 @@ impl App {
             if hit(pos, area) {
                 self.mr_detail_dragging = true;
                 return;
+            }
+        }
+
+        // Job click areas (MR Pipelines tab)
+        if self.mr_detail_tab == MrDetailTab::Pipelines {
+            let job_areas: Vec<(Rect, u64)> = self.click_regions.mr_detail.job_areas.clone();
+            for (area, job_id) in job_areas {
+                if hit(pos, area) {
+                    if self.selected_job_id == Some(job_id) && self.job_log_open {
+                        self.job_log_open = false;
+                        self.selected_job_id = None;
+                    } else {
+                        self.load_job_log(job_id);
+                    }
+                    return;
+                }
             }
         }
 
@@ -1098,6 +1130,8 @@ impl App {
         self.pipeline_detail_enriched = None;
         self.pipeline_detail_loading = true;
         self.pipeline_detail_scroll = 0;
+        self.job_log_open = false;
+        self.selected_job_id = None;
 
         let tx = self.message_tx.clone();
         let client = self.http_client.clone();
@@ -1208,6 +1242,8 @@ impl App {
         self.mr_detail_loading = true;
         self.mr_detail_full = None;
         self.mr_desc_scroll = 0;
+        self.job_log_open = false;
+        self.selected_job_id = None;
         self.mr_commits_loading = true;
         self.mr_commits.clear();
         self.mr_commits_scroll = 0;

@@ -669,10 +669,27 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    // Split horizontally if job log is open
+    let (list_area, log_area) = if app.job_log_open {
+        let splits = Layout::horizontal([
+            Constraint::Percentage(40),
+            Constraint::Percentage(60),
+        ]).split(area);
+        (splits[0], Some(splits[1]))
+    } else {
+        (area, None)
+    };
+
+    app.click_regions.mr_detail.job_areas.clear();
     let empty_stages = vec![];
     let mut lines: Vec<Line> = Vec::new();
+    let mut line_idx: u16 = 0;
+    let scroll = app.mr_pipelines_scroll;
+
     for pipeline in &app.mr_pipelines {
         let enriched = app.mr_pipeline_enriched.get(&pipeline.id);
+
+        // Header lines (no jobs)
         let view = PipelineView {
             id: pipeline.id,
             status: &pipeline.status,
@@ -682,17 +699,105 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
             user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
             mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
             mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
-            stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
+            stages: &[],
         };
-        lines.extend(pipeline_card_lines(&view, t, area.width));
+        let header = pipeline_card_lines(&view, t, list_area.width);
+        let header_len = header.len() as u16;
+        lines.extend(header);
+        line_idx += header_len;
+
+        // Stage/job lines with click areas
+        let stages = enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages);
+        for stage in stages {
+            let (s_icon, s_color) = match stage.status.as_str() {
+                "success" | "passed" => ("✓", t.success),
+                "failed" => ("✗", t.error),
+                "running" => ("●", t.warning),
+                "pending" => ("◌", t.info),
+                "canceled" | "skipped" => ("○", t.text_dim),
+                _ => ("?", t.border),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", s_icon), Style::default().fg(s_color)),
+                Span::styled(stage.name.clone(), Style::default().fg(t.text)),
+            ]));
+            line_idx += 1;
+
+            for job in &stage.jobs {
+                let (j_icon, j_color) = match job.status.as_str() {
+                    "success" | "passed" => ("✓", t.success),
+                    "failed" => ("✗", t.error),
+                    "running" => ("●", t.warning),
+                    "pending" => ("◌", t.info),
+                    "canceled" | "skipped" => ("○", t.text_dim),
+                    _ => ("○", t.border),
+                };
+                let is_selected = app.selected_job_id == Some(job.id);
+                let is_bridge = !job.sub_jobs.is_empty();
+                let style = if is_selected {
+                    Style::default().fg(t.bg).bg(t.accent)
+                } else if is_bridge {
+                    Style::default().fg(t.text)
+                } else {
+                    Style::default().fg(t.text_dim)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
+                    Span::styled(job.name.clone(), style),
+                ]));
+                let visible_row = (line_idx as i32) - (scroll as i32);
+                if visible_row >= 0 && (list_area.y + visible_row as u16) < list_area.y + list_area.height {
+                    app.click_regions.mr_detail.job_areas.push((Rect {
+                        x: list_area.x,
+                        y: list_area.y + visible_row as u16,
+                        width: list_area.width,
+                        height: 1,
+                    }, job.id));
+                }
+                line_idx += 1;
+
+                for sub in &job.sub_jobs {
+                    let (sj_icon, sj_color) = match sub.status.as_str() {
+                        "success" | "passed" => ("✓", t.success),
+                        "failed" => ("✗", t.error),
+                        "running" => ("●", t.warning),
+                        "pending" => ("◌", t.info),
+                        "canceled" | "skipped" => ("○", t.text_dim),
+                        _ => ("○", t.border),
+                    };
+                    let is_sel = app.selected_job_id == Some(sub.id);
+                    let sub_style = if is_sel { Style::default().fg(t.bg).bg(t.accent) } else { Style::default().fg(t.text_dim) };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("          {} ", sj_icon), Style::default().fg(sj_color)),
+                        Span::styled(sub.name.clone(), sub_style),
+                    ]));
+                    let visible_row = (line_idx as i32) - (scroll as i32);
+                    if visible_row >= 0 && (list_area.y + visible_row as u16) < list_area.y + list_area.height {
+                        app.click_regions.mr_detail.job_areas.push((Rect {
+                            x: list_area.x,
+                            y: list_area.y + visible_row as u16,
+                            width: list_area.width,
+                            height: 1,
+                        }, sub.id));
+                    }
+                    line_idx += 1;
+                }
+            }
+        }
+
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "─".repeat(area.width.saturating_sub(1) as usize),
+            "─".repeat(list_area.width.saturating_sub(1) as usize),
             Style::default().fg(t.border),
         )));
+        line_idx += 2;
     }
 
-    render_scrollable_lines(frame, &mut app.mr_pipelines_scroll, lines, area, t);
+    render_scrollable_lines(frame, &mut app.mr_pipelines_scroll, lines, list_area, t);
+
+    if let Some(log_area) = log_area {
+        render_job_log(frame, app, log_area);
+    }
 }
 
 fn format_time_ago(date_str: &str) -> String {
