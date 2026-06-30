@@ -6,7 +6,8 @@ use tokio::sync::mpsc;
 use crate::auth::{self, TokenSource};
 use crate::config;
 use crate::config::types::AppConfig;
-use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrState, Pipeline, ProjectInfo, User};
+use std::collections::HashMap;
+use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrPipeline, MrState, PipelineEnrichedData, Pipeline, ProjectInfo, StageStatus, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::table_nav::TableNav;
@@ -115,6 +116,8 @@ pub enum AppMessage {
     SearchResults(Result<Vec<ProjectInfo>, ProviderError>),
     MrDetailLoaded(Result<MergeRequest, ProviderError>),
     MrCommitsLoaded(Result<Vec<Commit>, ProviderError>),
+    MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
+    PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
     Tick,
 }
 
@@ -178,6 +181,10 @@ pub struct App {
     pub mr_commits: Vec<Commit>,
     pub mr_commits_loading: bool,
     pub mr_commits_scroll: u16,
+    pub mr_pipelines: Vec<MrPipeline>,
+    pub mr_pipelines_loading: bool,
+    pub mr_pipelines_scroll: u16,
+    pub mr_pipeline_enriched: HashMap<u64, PipelineEnrichedData>,
 
     // Pipeline detail state
     pub pipeline_detail_open: bool,
@@ -259,6 +266,10 @@ impl App {
             mr_commits: Vec::new(),
             mr_commits_loading: false,
             mr_commits_scroll: 0,
+            mr_pipelines: Vec::new(),
+            mr_pipelines_loading: false,
+            mr_pipelines_scroll: 0,
+            mr_pipeline_enriched: HashMap::new(),
             pipeline_detail_open: false,
             pipeline_detail_height: 0,
             click_regions: ClickRegions::default(),
@@ -621,6 +632,7 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_add(3),
+                                MrDetailTab::Pipelines => self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_add(3),
                                 _ => {}
                             }
                             return;
@@ -643,6 +655,7 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_sub(3),
+                                MrDetailTab::Pipelines => self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_sub(3),
                                 _ => {}
                             }
                             return;
@@ -943,6 +956,33 @@ impl App {
             AppMessage::MrCommitsLoaded(Err(_)) => {
                 self.mr_commits_loading = false;
             }
+            AppMessage::MrPipelinesLoaded(Ok(pipelines)) => {
+                self.mr_pipelines = pipelines;
+                self.mr_pipelines_loading = false;
+                // Load enriched data (duration, user, stages) for each pipeline
+                for pipeline in self.mr_pipelines.iter().take(5) {
+                    let pipeline_id = pipeline.id;
+                    let tx = self.message_tx.clone();
+                    let client = self.http_client.clone();
+                    let token = self.token_input.clone();
+                    let base_url = self.config.gitlab.base_url_or_default().to_string();
+                    let project_path = self.projects.get(self.selected_project)
+                        .map(|p| p.path_with_namespace.clone())
+                        .unwrap_or_default();
+                    tokio::spawn(async move {
+                        let provider = GitLabProvider::new(client, token, base_url, project_path);
+                        let result = provider.get_pipeline_enriched(pipeline_id).await;
+                        let _ = tx.send(AppMessage::PipelineEnrichedLoaded(pipeline_id, result));
+                    });
+                }
+            }
+            AppMessage::MrPipelinesLoaded(Err(_)) => {
+                self.mr_pipelines_loading = false;
+            }
+            AppMessage::PipelineEnrichedLoaded(pipeline_id, Ok(data)) => {
+                self.mr_pipeline_enriched.insert(pipeline_id, data);
+            }
+            AppMessage::PipelineEnrichedLoaded(_, Err(_)) => {}
             AppMessage::Tick => {
                 if self.screen == AppScreen::Main
                     && self.active_tab == Tab::Pipelines
@@ -1052,17 +1092,26 @@ impl App {
         self.mr_commits_loading = true;
         self.mr_commits.clear();
         self.mr_commits_scroll = 0;
+        self.mr_pipelines_loading = true;
+        self.mr_pipelines.clear();
+        self.mr_pipelines_scroll = 0;
+        self.mr_pipeline_enriched.clear();
 
         let tx = self.message_tx.clone();
         let tx2 = self.message_tx.clone();
+        let tx3 = self.message_tx.clone();
         let client = self.http_client.clone();
         let client2 = self.http_client.clone();
+        let client3 = self.http_client.clone();
         let token = self.token_input.clone();
         let token2 = self.token_input.clone();
+        let token3 = self.token_input.clone();
         let base_url = self.config.gitlab.base_url_or_default().to_string();
         let base_url2 = base_url.clone();
+        let base_url3 = base_url.clone();
         let project_path = project.path_with_namespace.clone();
-        let project_path2 = project.path_with_namespace.clone();
+        let project_path2 = project_path.clone();
+        let project_path3 = project_path.clone();
 
         tokio::spawn(async move {
             let provider = GitLabProvider::new(client, token, base_url, project_path);
@@ -1074,6 +1123,12 @@ impl App {
             let provider = GitLabProvider::new(client2, token2, base_url2, project_path2);
             let result = provider.list_mr_commits(mr_iid).await;
             let _ = tx2.send(AppMessage::MrCommitsLoaded(result));
+        });
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client3, token3, base_url3, project_path3);
+            let result = provider.list_mr_pipelines(mr_iid).await;
+            let _ = tx3.send(AppMessage::MrPipelinesLoaded(result));
         });
     }
 

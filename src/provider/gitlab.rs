@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use reqwest::Client;
+use serde::Deserialize;
 
 use super::{Provider, ProviderError, ProviderResult};
 use super::types::*;
@@ -235,4 +236,142 @@ impl Provider for GitLabProvider {
         let commits: Vec<Commit> = resp.error_for_status()?.json().await?;
         Ok(commits)
     }
+
+    async fn list_mr_pipelines(&self, mr_iid: u64) -> ProviderResult<Vec<MrPipeline>> {
+        let url = self.api_url(&format!(
+            "/projects/{}/merge_requests/{}/pipelines",
+            self.encoded_project_id(),
+            mr_iid
+        ));
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(ProviderError::NotFound("MR pipelines not found".into()));
+        }
+
+        let pipelines: Vec<MrPipeline> = resp.error_for_status()?.json().await?;
+        Ok(pipelines)
+    }
+
+    async fn get_pipeline_enriched(&self, pipeline_id: u64) -> ProviderResult<PipelineEnrichedData> {
+        // Fetch pipeline detail for duration, user, and stage names
+        let detail_url = self.api_url(&format!(
+            "/projects/{}/pipelines/{}",
+            self.encoded_project_id(),
+            pipeline_id
+        ));
+
+        #[derive(Deserialize)]
+        struct PipelineDetailResp {
+            #[serde(default)]
+            duration: Option<u64>,
+            #[serde(default)]
+            user: Option<PipelineUser>,
+            #[serde(default)]
+            status: String,
+        }
+
+        let detail_resp = self
+            .client
+            .get(&detail_url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await?;
+
+        let detail: PipelineDetailResp = detail_resp.error_for_status()?.json().await?;
+
+        // Fetch jobs AND bridges for stage statuses
+        let jobs_url = self.api_url(&format!(
+            "/projects/{}/pipelines/{}/jobs",
+            self.encoded_project_id(),
+            pipeline_id
+        ));
+
+        #[derive(Deserialize, Clone)]
+        struct Job {
+            name: String,
+            stage: String,
+            status: String,
+        }
+
+        let jobs_resp = self
+            .client
+            .get(&jobs_url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[("per_page", "100"), ("include_retried", "false")])
+            .send()
+            .await?;
+
+        let mut jobs: Vec<Job> = match jobs_resp.error_for_status() {
+            Ok(resp) => resp.json().await.unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+
+        // Also fetch bridges (child pipeline triggers count as stages)
+        let bridges_url = self.api_url(&format!(
+            "/projects/{}/pipelines/{}/bridges",
+            self.encoded_project_id(),
+            pipeline_id
+        ));
+
+        let bridges_resp = self
+            .client
+            .get(&bridges_url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[("per_page", "100")])
+            .send()
+            .await;
+
+        if let Ok(resp) = bridges_resp {
+            if let Ok(bridges) = resp.json::<Vec<Job>>().await {
+                jobs.extend(bridges);
+            }
+        }
+
+        // Group by stage, preserve order, collect jobs per stage
+        let mut stage_map: Vec<StageStatus> = Vec::new();
+        for job in &jobs {
+            if let Some(entry) = stage_map.iter_mut().find(|s| s.name == job.stage) {
+                entry.status = worse_status(&entry.status, &job.status);
+                entry.jobs.push(JobInfo { name: job.name.clone(), status: job.status.clone() });
+            } else {
+                stage_map.push(StageStatus {
+                    name: job.stage.clone(),
+                    status: job.status.clone(),
+                    jobs: vec![JobInfo { name: job.name.clone(), status: job.status.clone() }],
+                });
+            }
+        }
+
+        let stages = if stage_map.is_empty() {
+            vec![StageStatus { name: "pipeline".to_string(), status: detail.status, jobs: Vec::new() }]
+        } else {
+            stage_map
+        };
+
+        Ok(PipelineEnrichedData {
+            duration: detail.duration,
+            user: detail.user,
+            stages,
+        })
+    }
+}
+
+fn worse_status(a: &str, b: &str) -> String {
+    let priority = |s: &str| match s {
+        "failed" => 0,
+        "running" => 1,
+        "pending" => 2,
+        "canceled" => 3,
+        "skipped" => 4,
+        "success" | "passed" => 5,
+        _ => 3,
+    };
+    if priority(b) < priority(a) { b.to_string() } else { a.to_string() }
 }

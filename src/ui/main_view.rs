@@ -466,6 +466,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.mr_detail_tab {
         crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, &mr, content_area),
         crate::app::MrDetailTab::Commits => render_mr_commits(frame, app, content_area),
+        crate::app::MrDetailTab::Pipelines => render_mr_pipelines(frame, app, content_area),
         _ => {
             let placeholder = Paragraph::new(Span::styled(
                 "coming soon",
@@ -634,6 +635,142 @@ fn render_mr_commits(frame: &mut Frame, app: &mut App, area: Rect) {
     if content_height > visible_height {
         let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
             .position(app.mr_commits_scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
+}
+
+fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    if app.mr_pipelines_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    if app.mr_pipelines.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("No pipelines", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    for pipeline in &app.mr_pipelines {
+        let (icon, status_color) = match pipeline.status.as_str() {
+            "success" => ("✓", t.success),
+            "failed" => ("✗", t.error),
+            "running" => ("●", t.warning),
+            "pending" => ("◌", t.info),
+            "canceled" => ("○", t.text_dim),
+            _ => ("?", t.border),
+        };
+
+        let enriched = app.mr_pipeline_enriched.get(&pipeline.id);
+
+        let duration_str = enriched
+            .and_then(|e| e.duration)
+            .map(|d| {
+                let mins = d / 60;
+                let secs = d % 60;
+                if mins > 0 { format!("{}m {}s", mins, secs) } else { format!("{}s", secs) }
+            })
+            .unwrap_or_else(|| "—".to_string());
+
+        let time_ago = format_time_ago(&pipeline.created_at);
+
+        // Line 1: status icon + status | duration | time ago
+        lines.push(Line::from(vec![
+            Span::styled(format!("{} {}", icon, pipeline.status), Style::default().fg(status_color)),
+            Span::styled("  │  ", Style::default().fg(t.text_dim)),
+            Span::styled(format!("⏱ {}", duration_str), Style::default().fg(t.text)),
+            Span::styled("  │  ", Style::default().fg(t.text_dim)),
+            Span::styled(time_ago, Style::default().fg(t.text_dim)),
+        ]));
+
+        // Line 2: Pipeline ID + ref + triggered by
+        let user = enriched
+            .and_then(|e| e.user.as_ref())
+            .map(|u| format!("@{}", u.username))
+            .unwrap_or_else(|| "…".to_string());
+        lines.push(Line::from(vec![
+            Span::styled(format!("#{}", pipeline.id), Style::default().fg(t.accent)),
+            Span::styled(" — ", Style::default().fg(t.text_dim)),
+            Span::styled(pipeline.r#ref.clone(), Style::default().fg(t.info)),
+            Span::styled(" by ", Style::default().fg(t.text_dim)),
+            Span::styled(user, Style::default().fg(t.warning)),
+        ]));
+
+        // Stages with jobs
+        if let Some(stages) = enriched.map(|e| &e.stages).filter(|s| !s.is_empty()) {
+            for stage in stages {
+                let (s_icon, s_color) = match stage.status.as_str() {
+                    "success" => ("●", t.success),
+                    "failed" => ("●", t.error),
+                    "running" => ("●", t.warning),
+                    "pending" => ("○", t.info),
+                    "canceled" | "skipped" => ("○", t.text_dim),
+                    _ => ("○", t.border),
+                };
+                // Stage header
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {} ", s_icon), Style::default().fg(s_color)),
+                    Span::styled(&stage.name, Style::default().fg(t.text)),
+                ]));
+                // Jobs within stage
+                for job in &stage.jobs {
+                    let (j_icon, j_color) = match job.status.as_str() {
+                        "success" => ("✓", t.success),
+                        "failed" => ("✗", t.error),
+                        "running" => ("●", t.warning),
+                        "pending" => ("◌", t.info),
+                        "canceled" | "skipped" => ("○", t.text_dim),
+                        _ => ("○", t.border),
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
+                        Span::styled(&job.name, Style::default().fg(t.text_dim)),
+                    ]));
+                }
+            }
+        }
+
+        // Separator
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "─".repeat(area.width.saturating_sub(1) as usize),
+            Style::default().fg(t.border),
+        )));
+    }
+
+    let visible_height = area.height;
+    let content_height = lines.len() as u16;
+    let max_scroll = content_height.saturating_sub(visible_height);
+    if app.mr_pipelines_scroll > max_scroll {
+        app.mr_pipelines_scroll = max_scroll;
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .scroll((app.mr_pipelines_scroll, 0));
+    frame.render_widget(paragraph, area);
+
+    if content_height > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+            .position(app.mr_pipelines_scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None)

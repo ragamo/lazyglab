@@ -93,6 +93,44 @@ pub struct Commit {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct MrPipeline {
+    pub id: u64,
+    pub status: String,
+    pub r#ref: String,
+    pub web_url: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub duration: Option<u64>,
+    #[serde(default)]
+    pub user: Option<PipelineUser>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PipelineUser {
+    pub username: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PipelineEnrichedData {
+    pub duration: Option<u64>,
+    pub user: Option<PipelineUser>,
+    pub stages: Vec<StageStatus>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StageStatus {
+    pub name: String,
+    pub status: String,
+    pub jobs: Vec<JobInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JobInfo {
+    pub name: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ProjectInfo {
     pub id: u64,
     pub name: String,
