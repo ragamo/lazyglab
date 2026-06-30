@@ -867,7 +867,6 @@ impl App {
                         self.mr_detail_tab = MrDetailTab::default();
                     } else {
                         self.mr_nav.selected = Some(actual_index);
-                        self.mr_detail_tab = MrDetailTab::default();
                         self.load_mr_detail();
                     }
                     return;
