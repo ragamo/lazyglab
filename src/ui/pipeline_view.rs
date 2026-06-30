@@ -136,32 +136,65 @@ fn status_style_job(status: &str, t: &Theme) -> (&'static str, Color) {
 }
 
 fn format_time_ago(date_str: &str) -> String {
-    if date_str.len() < 10 { return date_str.to_string(); }
-    let date_part = &date_str[..10];
-    let parts: Vec<&str> = date_part.split('-').collect();
-    if parts.len() != 3 { return date_part.to_string(); }
-    let (y, m, d) = match (parts[0].parse::<i64>(), parts[1].parse::<i64>(), parts[2].parse::<i64>()) {
-        (Ok(y), Ok(m), Ok(d)) => (y, m, d),
-        _ => return date_part.to_string(),
-    };
-    let date_days = y * 365 + m * 30 + d;
-    let now_days = {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        (now / 86400) as i64
-    };
-    let epoch_offset = 1970 * 365 + 1 * 30 + 1;
-    let diff = now_days - (date_days - epoch_offset);
-    if diff <= 0 { "today".to_string() }
-    else if diff == 1 { "yesterday".to_string() }
-    else if diff < 30 { format!("{} days ago", diff) }
-    else if diff < 365 {
-        let m = diff / 30;
+    let ts = parse_iso_to_unix(date_str);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let diff = now - ts;
+    if diff < 60 { "just now".to_string() }
+    else if diff < 3600 {
+        let m = diff / 60;
+        if m == 1 { "1 min ago".to_string() } else { format!("{} mins ago", m) }
+    } else if diff < 86400 {
+        let h = diff / 3600;
+        if h == 1 { "1 hour ago".to_string() } else { format!("{} hours ago", h) }
+    } else if diff < 86400 * 30 {
+        let d = diff / 86400;
+        if d == 1 { "yesterday".to_string() } else { format!("{} days ago", d) }
+    } else if diff < 86400 * 365 {
+        let m = diff / (86400 * 30);
         if m == 1 { "1 month ago".to_string() } else { format!("{} months ago", m) }
     } else {
-        let y = diff / 365;
+        let y = diff / (86400 * 365);
         if y == 1 { "1 year ago".to_string() } else { format!("{} years ago", y) }
     }
+}
+
+/// Parse ISO 8601 timestamp to Unix seconds without external deps.
+/// Handles "2026-06-30T14:05:23.000Z" and "2026-06-30T14:05:23+00:00".
+fn parse_iso_to_unix(s: &str) -> i64 {
+    // Expect at least "YYYY-MM-DDTHH:MM:SS"
+    if s.len() < 19 { return 0; }
+    let b = s.as_bytes();
+    let get = |i: usize, j: usize| -> Option<i64> {
+        std::str::from_utf8(&b[i..j]).ok()?.parse().ok()
+    };
+    let (y, mo, d, h, mi, sec) = match (get(0,4), get(5,7), get(8,10), get(11,13), get(14,16), get(17,19)) {
+        (Some(y), Some(mo), Some(d), Some(h), Some(mi), Some(s)) => (y, mo, d, h, mi, s),
+        _ => return 0,
+    };
+    // Days since epoch using Julian day number approach
+    let days = days_from_ymd(y, mo, d);
+    let mut unix = days * 86400 + h * 3600 + mi * 60 + sec;
+    // Parse timezone offset if present (e.g. +02:00 or -05:00)
+    if let Some(tz_start) = s[19..].find(|c| c == '+' || c == '-') {
+        let tz = &s[19 + tz_start..];
+        if tz.len() >= 6 {
+            let sign: i64 = if tz.starts_with('+') { 1 } else { -1 };
+            let th: i64 = tz[1..3].parse().unwrap_or(0);
+            let tm: i64 = tz[4..6].parse().unwrap_or(0);
+            unix -= sign * (th * 3600 + tm * 60);
+        }
+    }
+    unix
+}
+
+fn days_from_ymd(y: i64, m: i64, d: i64) -> i64 {
+    // Algorithm: days from 1970-01-01
+    let m = if m <= 2 { m + 9 } else { m - 3 };
+    let y = if m > 9 { y - 1 } else { y };
+    let c = y / 100;
+    let yr = y - 100 * c;
+    (146097 * c) / 4 + (1461 * yr) / 4 + (153 * m + 2) / 5 + d - 719469
 }
