@@ -1,3 +1,7 @@
+// Provider trait, GitLab JSON models and some enum variants are intentional
+// scaffolding (e.g. the future GitHub provider) that isn't wired up yet.
+#![allow(dead_code)]
+
 mod app;
 mod auth;
 mod config;

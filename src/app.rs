@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::prelude::Rect;
 use tokio::sync::mpsc;
@@ -8,7 +6,7 @@ use crate::auth::{self, TokenSource};
 use crate::config;
 use crate::config::types::AppConfig;
 use std::collections::HashMap;
-use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrChange, MrPipeline, MrState, PipelineEnrichedData, Pipeline, ProjectInfo, StageStatus, User};
+use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrChange, MrPipeline, MrState, PipelineEnrichedData, Pipeline, ProjectInfo, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::table_nav::TableNav;
@@ -701,7 +699,6 @@ impl App {
                                         self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_add(3);
                                     }
                                 }
-                                _ => {}
                             }
                             return;
                         }
@@ -744,7 +741,6 @@ impl App {
                                         self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_sub(3);
                                     }
                                 }
-                                _ => {}
                             }
                             return;
                         }
