@@ -128,6 +128,7 @@ pub struct StageStatus {
 pub struct JobInfo {
     pub name: String,
     pub status: String,
+    pub sub_jobs: Vec<JobInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

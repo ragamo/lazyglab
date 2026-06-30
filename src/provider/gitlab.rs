@@ -313,7 +313,21 @@ impl Provider for GitLabProvider {
             Err(_) => Vec::new(),
         };
 
-        // Also fetch bridges (child pipeline triggers count as stages)
+        // Fetch bridges — each may have a downstream child pipeline
+        #[derive(Deserialize)]
+        struct DownstreamPipeline {
+            id: u64,
+        }
+
+        #[derive(Deserialize)]
+        struct Bridge {
+            name: String,
+            stage: String,
+            status: String,
+            #[serde(default)]
+            downstream_pipeline: Option<DownstreamPipeline>,
+        }
+
         let bridges_url = self.api_url(&format!(
             "/projects/{}/pipelines/{}/bridges",
             self.encoded_project_id(),
@@ -328,23 +342,64 @@ impl Provider for GitLabProvider {
             .send()
             .await;
 
+        // For each bridge with a downstream pipeline, fetch its jobs
+        let mut bridge_jobs: Vec<JobInfo> = Vec::new();
         if let Ok(resp) = bridges_resp {
-            if let Ok(bridges) = resp.json::<Vec<Job>>().await {
-                jobs.extend(bridges);
+            if let Ok(bridges) = resp.json::<Vec<Bridge>>().await {
+                for bridge in &bridges {
+                    let mut sub_jobs: Vec<JobInfo> = Vec::new();
+                    if let Some(ref downstream) = bridge.downstream_pipeline {
+                        let child_jobs_url = self.api_url(&format!(
+                            "/projects/{}/pipelines/{}/jobs",
+                            self.encoded_project_id(),
+                            downstream.id
+                        ));
+                        let child_resp = self
+                            .client
+                            .get(&child_jobs_url)
+                            .header("PRIVATE-TOKEN", &self.token)
+                            .query(&[("per_page", "100")])
+                            .send()
+                            .await;
+                        if let Ok(r) = child_resp {
+                            if let Ok(child_jobs) = r.json::<Vec<Job>>().await {
+                                sub_jobs = child_jobs.into_iter().rev()
+                                    .map(|j| JobInfo { name: j.name, status: j.status, sub_jobs: Vec::new() })
+                                    .collect();
+                            }
+                        }
+                    }
+                    bridge_jobs.push(JobInfo {
+                        name: bridge.name.clone(),
+                        status: bridge.status.clone(),
+                        sub_jobs,
+                    });
+                    // Add bridge as a regular job entry for stage grouping
+                    jobs.push(Job { name: bridge.name.clone(), stage: bridge.stage.clone(), status: bridge.status.clone() });
+                }
             }
         }
 
         // Group by stage, preserve order, collect jobs per stage
         let mut stage_map: Vec<StageStatus> = Vec::new();
         for job in &jobs {
+            // Check if this job is a bridge (has sub_jobs)
+            let job_info = if let Some(bj) = bridge_jobs.iter().find(|b| b.name == job.name) {
+                bj.clone()
+            } else {
+                JobInfo { name: job.name.clone(), status: job.status.clone(), sub_jobs: Vec::new() }
+            };
+
             if let Some(entry) = stage_map.iter_mut().find(|s| s.name == job.stage) {
                 entry.status = worse_status(&entry.status, &job.status);
-                entry.jobs.push(JobInfo { name: job.name.clone(), status: job.status.clone() });
+                if !entry.jobs.iter().any(|j| j.name == job.name) {
+                    entry.jobs.push(job_info);
+                }
             } else {
                 stage_map.push(StageStatus {
                     name: job.stage.clone(),
                     status: job.status.clone(),
-                    jobs: vec![JobInfo { name: job.name.clone(), status: job.status.clone() }],
+                    jobs: vec![job_info],
                 });
             }
         }

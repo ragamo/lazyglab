@@ -741,10 +741,26 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                         "canceled" | "skipped" => ("○", t.text_dim),
                         _ => ("○", t.border),
                     };
+                    let is_bridge = !job.sub_jobs.is_empty();
                     lines.push(Line::from(vec![
                         Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
-                        Span::styled(&job.name, Style::default().fg(t.text_dim)),
+                        Span::styled(&job.name, Style::default().fg(if is_bridge { t.text } else { t.text_dim })),
                     ]));
+                    // Sub-jobs (downstream pipeline jobs)
+                    for sub in &job.sub_jobs {
+                        let (sj_icon, sj_color) = match sub.status.as_str() {
+                            "success" => ("✓", t.success),
+                            "failed" => ("✗", t.error),
+                            "running" => ("●", t.warning),
+                            "pending" => ("◌", t.info),
+                            "canceled" | "skipped" => ("○", t.text_dim),
+                            _ => ("○", t.border),
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("          {} ", sj_icon), Style::default().fg(sj_color)),
+                            Span::styled(&sub.name, Style::default().fg(t.text_dim)),
+                        ]));
+                    }
                 }
             }
         }
