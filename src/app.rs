@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use crate::auth::{self, TokenSource};
 use crate::config;
 use crate::config::types::AppConfig;
-use crate::provider::types::{MergeRequest, Pipeline, ProjectInfo, User};
+use crate::provider::types::{ListMrParams, MergeRequest, MrState, Pipeline, ProjectInfo, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::theme::{self, Theme};
@@ -86,6 +86,7 @@ pub struct App {
     pub provider: Option<Box<dyn Provider>>,
     pub current_user: Option<User>,
     pub merge_requests: Vec<MergeRequest>,
+    pub mrs_loading: bool,
     pub pipelines: Vec<Pipeline>,
 
     pub active_tab: Tab,
@@ -132,51 +133,6 @@ impl App {
         let config = config::load_config().unwrap_or_default();
         let http_client = reqwest::Client::new();
 
-        let mock_mrs = vec![
-            MergeRequest {
-                id: 101, iid: 42, title: "feat: add dark mode support".into(),
-                author: User { id: 1, username: "ragamo".into(), name: "Christian".into() },
-                state: "opened".into(), source_branch: "feat/dark-mode".into(),
-                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/42".into(),
-                created_at: "2026-06-28T10:00:00Z".into(), updated_at: "2026-06-29T08:30:00Z".into(),
-            },
-            MergeRequest {
-                id: 102, iid: 41, title: "fix: resolve pipeline timeout on large repos".into(),
-                author: User { id: 2, username: "alice".into(), name: "Alice Dev".into() },
-                state: "opened".into(), source_branch: "fix/pipeline-timeout".into(),
-                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/41".into(),
-                created_at: "2026-06-27T14:00:00Z".into(), updated_at: "2026-06-28T16:00:00Z".into(),
-            },
-            MergeRequest {
-                id: 103, iid: 40, title: "refactor: extract provider trait".into(),
-                author: User { id: 1, username: "ragamo".into(), name: "Christian".into() },
-                state: "merged".into(), source_branch: "refactor/provider-trait".into(),
-                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/40".into(),
-                created_at: "2026-06-25T09:00:00Z".into(), updated_at: "2026-06-26T11:00:00Z".into(),
-            },
-            MergeRequest {
-                id: 104, iid: 39, title: "chore: update CI config".into(),
-                author: User { id: 2, username: "alice".into(), name: "Alice Dev".into() },
-                state: "merged".into(), source_branch: "chore/ci-update".into(),
-                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/39".into(),
-                created_at: "2026-06-20T08:00:00Z".into(), updated_at: "2026-06-21T10:00:00Z".into(),
-            },
-            MergeRequest {
-                id: 105, iid: 38, title: "feat: initial splash screen".into(),
-                author: User { id: 1, username: "ragamo".into(), name: "Christian".into() },
-                state: "closed".into(), source_branch: "feat/splash-v1".into(),
-                target_branch: "main".into(), web_url: "https://gitlab.com/ragamo/lazyglab/-/merge_requests/38".into(),
-                created_at: "2026-06-18T12:00:00Z".into(), updated_at: "2026-06-19T09:00:00Z".into(),
-            },
-        ];
-
-        let mock_pipelines = vec![
-            Pipeline { id: 501, status: "success".into(), r#ref: "main".into(), web_url: "https://gitlab.com/pipelines/501".into() },
-            Pipeline { id: 500, status: "running".into(), r#ref: "feat/dark-mode".into(), web_url: "https://gitlab.com/pipelines/500".into() },
-            Pipeline { id: 499, status: "failed".into(), r#ref: "fix/pipeline-timeout".into(), web_url: "https://gitlab.com/pipelines/499".into() },
-            Pipeline { id: 498, status: "success".into(), r#ref: "refactor/provider-trait".into(), web_url: "https://gitlab.com/pipelines/498".into() },
-            Pipeline { id: 497, status: "canceled".into(), r#ref: "main".into(), web_url: "https://gitlab.com/pipelines/497".into() },
-        ];
 
         let active_theme = config
             .ui
@@ -199,8 +155,9 @@ impl App {
             is_validating: false,
             provider: None,
             current_user: None,
-            merge_requests: mock_mrs,
-            pipelines: mock_pipelines,
+            merge_requests: Vec::new(),
+            mrs_loading: false,
+            pipelines: Vec::new(),
             active_tab: Tab::default(),
             mr_filter: MrFilter::default(),
             projects: config.gitlab.favorites.iter().map(|f| Project {
@@ -328,7 +285,10 @@ impl App {
                                 self.selected_project += 1;
                             }
                         }
-                        KeyCode::Enter => self.project_selector_open = false,
+                        KeyCode::Enter => {
+                            self.project_selector_open = false;
+                            self.load_merge_requests();
+                        }
                         KeyCode::Char('s') => {
                             if let Some(project) = self.projects.get(self.selected_project) {
                                 let id = project.id;
@@ -386,6 +346,7 @@ impl App {
                         .position(|p| p.id == project.id)
                         .unwrap_or(0);
                     self.find_modal_open = false;
+                    self.load_merge_requests();
                 }
             }
             KeyCode::Up => {
@@ -503,6 +464,7 @@ impl App {
                 if hit(pos, *area) {
                     self.selected_project = i;
                     self.project_selector_open = false;
+                    self.load_merge_requests();
                     return;
                 }
             }
@@ -574,6 +536,7 @@ impl App {
                             .position(|p| p.id == project.id)
                             .unwrap_or(0);
                         self.find_modal_open = false;
+                        self.load_merge_requests();
                     }
                     return;
                 }
@@ -590,6 +553,10 @@ impl App {
 
                 self.config.auth.token = Some(self.token_input.clone());
                 let _ = config::save_config(&self.config);
+
+                if !self.projects.is_empty() {
+                    self.load_merge_requests();
+                }
             }
             AppMessage::TokenValidated(Err(e)) => {
                 self.is_validating = false;
@@ -616,8 +583,11 @@ impl App {
             }
             AppMessage::MergeRequestsLoaded(Ok(mrs)) => {
                 self.merge_requests = mrs;
+                self.mrs_loading = false;
             }
-            AppMessage::MergeRequestsLoaded(Err(_)) => {}
+            AppMessage::MergeRequestsLoaded(Err(_)) => {
+                self.mrs_loading = false;
+            }
         }
     }
 
@@ -635,6 +605,27 @@ impl App {
             let provider = GitLabProvider::new(client, token, base_url, String::new());
             let result = provider.search_projects(&query).await;
             let _ = tx.send(AppMessage::SearchResults(result));
+        });
+    }
+
+    fn load_merge_requests(&mut self) {
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        self.mrs_loading = true;
+        self.merge_requests.clear();
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let params = ListMrParams { state: MrState::All, page: 1, per_page: 50 };
+            let result = provider.list_merge_requests(params).await;
+            let _ = tx.send(AppMessage::MergeRequestsLoaded(result));
         });
     }
 

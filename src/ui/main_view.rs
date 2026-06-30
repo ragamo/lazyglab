@@ -156,14 +156,51 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let content_area = chunks[1];
 
+    if app.mrs_loading {
+        let loading = Paragraph::new("Loading merge requests...")
+            .style(Style::default().fg(t.text_dim))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(t.border)),
+            );
+        frame.render_widget(loading, content_area);
+        return;
+    }
+
+    let filtered: Vec<&_> = app
+        .merge_requests
+        .iter()
+        .filter(|mr| app.mr_filter.matches(&mr.state))
+        .collect();
+
+    if filtered.is_empty() {
+        let msg = if app.merge_requests.is_empty() {
+            "No project selected or no merge requests"
+        } else {
+            "No merge requests match this filter"
+        };
+        let empty = Paragraph::new(msg)
+            .style(Style::default().fg(t.text_dim))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(t.border)),
+            );
+        frame.render_widget(empty, content_area);
+        return;
+    }
+
     let header = Row::new(vec!["IID", "Title", "Author", "Branch", "Updated"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
-    let rows: Vec<Row> = app
-        .merge_requests
+    let rows: Vec<Row> = filtered
         .iter()
-        .filter(|mr| app.mr_filter.matches(&mr.state))
         .map(|mr| {
             let status_color = match mr.state.as_str() {
                 "opened" => t.success,
