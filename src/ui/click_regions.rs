@@ -5,6 +5,7 @@ pub struct ClickRegions {
     pub header: HeaderRegion,
     pub main: MainRegion,
     pub mr_detail: MrDetailRegion,
+    pub pipeline_detail: PipelineDetailRegion,
     pub find_modal: FindModalRegion,
     pub project_dropdown: ProjectDropdownRegion,
 }
@@ -14,6 +15,7 @@ impl ClickRegions {
         self.header = HeaderRegion::default();
         self.main = MainRegion::default();
         self.mr_detail = MrDetailRegion::default();
+        self.pipeline_detail = PipelineDetailRegion::default();
         self.find_modal = FindModalRegion::default();
         self.project_dropdown = ProjectDropdownRegion::default();
     }
@@ -33,6 +35,7 @@ pub struct HeaderRegion {
 pub struct MainRegion {
     pub mr_filter_areas: Vec<Rect>,
     pub mr_row_areas: Vec<Rect>,
+    pub pipeline_row_areas: Vec<Rect>,
     pub autoreload_checkbox: Option<Rect>,
 }
 
@@ -42,6 +45,12 @@ pub struct MrDetailRegion {
     pub close: Option<Rect>,
     pub resize: Option<Rect>,
     pub tab_areas: Vec<Rect>,
+}
+
+#[derive(Default)]
+pub struct PipelineDetailRegion {
+    pub bounds: Option<Rect>,
+    pub close: Option<Rect>,
 }
 
 #[derive(Default)]

@@ -195,7 +195,25 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
                 render_merge_requests(frame, app, area);
             }
         }
-        Tab::Pipelines => render_pipelines(frame, app, area),
+        Tab::Pipelines => {
+            if app.pipeline_detail_open {
+                if app.pipeline_detail_height == 0 {
+                    app.pipeline_detail_height = (area.height * 65 / 100).max(14);
+                }
+                let detail_height = app.pipeline_detail_height.min(area.height.saturating_sub(6));
+                let table_height = area.height.saturating_sub(detail_height);
+                let splits = Layout::vertical([
+                    Constraint::Length(table_height),
+                    Constraint::Length(detail_height),
+                ])
+                .split(area);
+                render_pipelines(frame, app, splits[0]);
+                render_pipeline_detail(frame, app, splits[1]);
+            } else {
+                app.pipeline_detail_height = 0;
+                render_pipelines(frame, app, area);
+            }
+        }
     }
 }
 
@@ -725,6 +743,19 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_widget(table, content_area);
 
+    // Register click areas for visible pipeline rows
+    let row_start_y = content_area.y + 3; // border + header + margin
+    app.click_regions.main.pipeline_row_areas = visible
+        .iter()
+        .enumerate()
+        .map(|(i, _)| Rect {
+            x: content_area.x + 1,
+            y: row_start_y + i as u16,
+            width: content_area.width.saturating_sub(2),
+            height: 1,
+        })
+        .collect();
+
     if total > visible_rows {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(visible_rows))
             .position(app.pipeline_nav.offset);
@@ -741,6 +772,46 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         };
         frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
     }
+}
+
+fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    let pipeline = match app.pipeline_nav.selected.and_then(|i| app.pipelines.get(i)) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
+        .border_style(Style::default().fg(t.accent));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let title = format!(
+        "Pipeline #{} — {} ({})",
+        pipeline.id, pipeline.status, pipeline.r#ref
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(title, Style::default().fg(t.text).add_modifier(Modifier::BOLD))),
+        inner,
+    );
+
+    // Close button [X]
+    let close_area = Rect {
+        x: area.x + area.width.saturating_sub(4),
+        y: area.y,
+        width: 3,
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled("[X]", Style::default().fg(t.text_dim))),
+        close_area,
+    );
+    app.click_regions.pipeline_detail.bounds = Some(area);
+    app.click_regions.pipeline_detail.close = Some(close_area);
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {

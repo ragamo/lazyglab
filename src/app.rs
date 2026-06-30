@@ -174,6 +174,10 @@ pub struct App {
     pub mr_detail_loading: bool,
     pub mr_detail_full: Option<MergeRequest>,
 
+    // Pipeline detail state
+    pub pipeline_detail_open: bool,
+    pub pipeline_detail_height: u16,
+
     // Click areas (grouped by region)
     pub click_regions: ClickRegions,
 }
@@ -246,6 +250,8 @@ impl App {
             mr_detail_tab: MrDetailTab::default(),
             mr_detail_loading: false,
             mr_detail_full: None,
+            pipeline_detail_open: false,
+            pipeline_detail_height: 0,
             click_regions: ClickRegions::default(),
         };
 
@@ -375,8 +381,14 @@ impl App {
                             self.mr_detail_full = None;
                             self.mr_detail_tab = MrDetailTab::default();
                         }
+                        KeyCode::Esc if self.pipeline_detail_open => {
+                            self.pipeline_detail_open = false;
+                        }
                         KeyCode::Esc if self.mr_nav.selected.is_some() => {
                             self.mr_nav.selected = None;
+                        }
+                        KeyCode::Esc if self.pipeline_nav.selected.is_some() => {
+                            self.pipeline_nav.selected = None;
                         }
                         KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
                         KeyCode::Char('1') => self.active_tab = Tab::MergeRequests,
@@ -412,6 +424,9 @@ impl App {
                         KeyCode::Down | KeyCode::Char('j') if self.active_tab == Tab::Pipelines => {
                             let count = self.pipelines.len();
                             self.pipeline_nav.move_down(count);
+                        }
+                        KeyCode::Enter if self.active_tab == Tab::Pipelines && self.pipeline_nav.selected.is_some() => {
+                            self.pipeline_detail_open = true;
                         }
                         KeyCode::Enter if self.active_tab == Tab::MergeRequests && self.mr_nav.selected.is_some() => {
                             self.load_mr_detail();
@@ -795,6 +810,38 @@ impl App {
                 }
             }
         }
+
+        if self.active_tab == Tab::Pipelines {
+            // Pipeline detail close button
+            if let Some(area) = self.click_regions.pipeline_detail.close {
+                if hit(pos, area) {
+                    self.pipeline_detail_open = false;
+                    return;
+                }
+            }
+
+            // Pipeline detail bounds — consume click
+            if self.pipeline_detail_open {
+                if let Some(bounds) = self.click_regions.pipeline_detail.bounds {
+                    if hit(pos, bounds) {
+                        return;
+                    }
+                }
+            }
+
+            for (i, area) in self.click_regions.main.pipeline_row_areas.iter().enumerate() {
+                if hit(pos, *area) {
+                    let actual_index = self.pipeline_nav.offset + i;
+                    if self.pipeline_nav.selected == Some(actual_index) && self.pipeline_detail_open {
+                        self.pipeline_detail_open = false;
+                    } else {
+                        self.pipeline_nav.selected = Some(actual_index);
+                        self.pipeline_detail_open = true;
+                    }
+                    return;
+                }
+            }
+        }
     }
 
     pub fn handle_message(&mut self, msg: AppMessage) {
@@ -892,6 +939,7 @@ impl App {
         };
         self.pipelines_loading = true;
         self.pipeline_nav.reset();
+        self.pipeline_detail_open = false;
         self.last_pipeline_refresh = Some(Instant::now());
 
         let tx = self.message_tx.clone();
