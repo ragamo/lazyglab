@@ -23,7 +23,7 @@ impl TableNav {
     }
 
     pub fn move_down(&mut self, item_count: usize) -> bool {
-        if item_count <= 1 { return false; }
+        if item_count == 0 { return false; }
         let new_index = match self.selected {
             Some(i) if i >= item_count - 1 => return false,
             Some(i) => i + 1,
@@ -37,7 +37,7 @@ impl TableNav {
     }
 
     pub fn move_up(&mut self, item_count: usize) -> bool {
-        if item_count <= 1 { return false; }
+        if item_count == 0 { return false; }
         let new_index = match self.selected {
             Some(0) => return false,
             Some(i) => i - 1,

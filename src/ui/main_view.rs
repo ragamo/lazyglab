@@ -167,7 +167,7 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
         Tab::MergeRequests => {
-            if app.mr_nav.selected.is_some() {
+            if app.mr_detail_open {
                 // Init height on first open
                 if app.mr_detail_height == 0 {
                     app.mr_detail_height = (area.height * 65 / 100).max(14);

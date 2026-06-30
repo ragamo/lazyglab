@@ -167,6 +167,7 @@ pub struct App {
     pub pipeline_nav: TableNav,
 
     // MR detail state
+    pub mr_detail_open: bool,
     pub mr_detail_height: u16,
     pub mr_detail_dragging: bool,
     pub mr_detail_tab: MrDetailTab,
@@ -239,6 +240,7 @@ impl App {
             theme: active_theme,
             mr_nav: TableNav::default(),
             pipeline_nav: TableNav::default(),
+            mr_detail_open: false,
             mr_detail_height: 0,
             mr_detail_dragging: false,
             mr_detail_tab: MrDetailTab::default(),
@@ -255,7 +257,7 @@ impl App {
         if self.project_selector_open { return FocusLayer::ProjectDropdown; }
         if self.find_modal_open { return FocusLayer::FindModal; }
         if self.settings_open { return FocusLayer::SettingsModal; }
-        if self.mr_nav.selected.is_some() { return FocusLayer::MrDetail; }
+        if self.mr_detail_open { return FocusLayer::MrDetail; }
         FocusLayer::Main
     }
 
@@ -368,10 +370,13 @@ impl App {
                     }
                 } else {
                     match key.code {
-                        KeyCode::Esc if self.mr_nav.selected.is_some() => {
-                            self.mr_nav.selected = None;
+                        KeyCode::Esc if self.mr_detail_open => {
+                            self.mr_detail_open = false;
                             self.mr_detail_full = None;
                             self.mr_detail_tab = MrDetailTab::default();
+                        }
+                        KeyCode::Esc if self.mr_nav.selected.is_some() => {
+                            self.mr_nav.selected = None;
                         }
                         KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
                         KeyCode::Char('1') => self.active_tab = Tab::MergeRequests,
@@ -390,13 +395,13 @@ impl App {
                         }
                         KeyCode::Up | KeyCode::Char('k') if self.active_tab == Tab::MergeRequests => {
                             let count = self.filtered_mr_count();
-                            if self.mr_nav.move_up(count) {
+                            if self.mr_nav.move_up(count) && self.mr_detail_open {
                                 self.load_mr_detail();
                             }
                         }
                         KeyCode::Down | KeyCode::Char('j') if self.active_tab == Tab::MergeRequests => {
                             let count = self.filtered_mr_count();
-                            if self.mr_nav.move_down(count) {
+                            if self.mr_nav.move_down(count) && self.mr_detail_open {
                                 self.load_mr_detail();
                             }
                         }
@@ -486,14 +491,21 @@ impl App {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + 1) % filters.len()].clone();
-        self.mr_nav.reset();
+        self.close_mr_detail();
     }
 
     fn cycle_mr_filter_back(&mut self) {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + filters.len() - 1) % filters.len()].clone();
+        self.close_mr_detail();
+    }
+
+    fn close_mr_detail(&mut self) {
+        self.mr_detail_open = false;
         self.mr_nav.reset();
+        self.mr_detail_full = None;
+        self.mr_detail_tab = MrDetailTab::default();
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -672,7 +684,7 @@ impl App {
 
         if let Some(area) = self.click_regions.mr_detail.close {
             if hit(pos, area) {
-                self.mr_nav.selected = None;
+                self.mr_detail_open = false;
                 self.mr_detail_full = None;
                 self.mr_detail_tab = MrDetailTab::default();
                 return;
@@ -760,7 +772,7 @@ impl App {
             if hit(pos, *area) {
                 if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
                     self.mr_filter = f.clone();
-                    self.mr_nav.reset();
+                    self.close_mr_detail();
                 }
                 return;
             }
@@ -770,8 +782,8 @@ impl App {
             for (i, area) in self.click_regions.main.mr_row_areas.iter().enumerate() {
                 if hit(pos, *area) {
                     let actual_index = self.mr_nav.offset + i;
-                    if self.mr_nav.selected == Some(actual_index) {
-                        self.mr_nav.selected = None;
+                    if self.mr_nav.selected == Some(actual_index) && self.mr_detail_open {
+                        self.mr_detail_open = false;
                         self.mr_detail_full = None;
                         self.mr_detail_tab = MrDetailTab::default();
                     } else {
@@ -945,6 +957,7 @@ impl App {
             None => return,
         };
 
+        self.mr_detail_open = true;
         self.mr_detail_loading = true;
         self.mr_detail_full = None;
 
