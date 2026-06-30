@@ -1162,7 +1162,7 @@ impl App {
                 if self.pipeline_detail_open && self.has_running_jobs() {
                     self.refresh_pipeline_detail();
                 }
-                if self.job_log_open && self.is_selected_job_running() {
+                if self.job_log_open && !self.job_log_loading {
                     self.refresh_job_log();
                 }
             }
@@ -1283,23 +1283,17 @@ impl App {
     }
 
     pub fn has_running_jobs(&self) -> bool {
-        self.pipeline_detail_enriched.as_ref().map_or(false, |data| {
+        let in_detail = self.pipeline_detail_enriched.as_ref().map_or(false, |data| {
             data.stages.iter().any(|stage| {
-                stage.jobs.iter().any(|job| job.status == "running")
+                stage.jobs.iter().any(|job| job.status == "running" || job.sub_jobs.iter().any(|s| s.status == "running"))
             })
-        })
-    }
-
-    pub fn is_selected_job_running(&self) -> bool {
-        let job_id = match self.selected_job_id {
-            Some(id) => id,
-            None => return false,
-        };
-        self.pipeline_detail_enriched.as_ref().map_or(false, |data| {
+        });
+        let in_mr = self.mr_pipeline_enriched.values().any(|data| {
             data.stages.iter().any(|stage| {
-                stage.jobs.iter().any(|job| job.id == job_id && job.status == "running")
+                stage.jobs.iter().any(|job| job.status == "running" || job.sub_jobs.iter().any(|s| s.status == "running"))
             })
-        })
+        });
+        in_detail || in_mr
     }
 
     pub fn load_pipelines(&mut self) {
