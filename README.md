@@ -7,15 +7,49 @@ Built with [ratatui](https://ratatui.rs) and Rust. Mouse-first interaction.
 ## Features
 
 - **Merge requests** — list MRs by project with open / merged / closed / all filters
+- **MR detail view** — tabbed panel with Overview, Commits, Pipelines, and Changes
+- **Overview** — rendered Markdown description with scrolling
+- **Commits** — full commit list for the MR with author and relative time
+- **Changes (diff viewer)** — colored unified diffs with old/new line-number gutter, sticky file headers while scrolling, and faint backgrounds on added/removed lines
 - **Pipelines** — live pipeline status with configurable auto-reload
-- **Project favorites** — bookmark projects via the Find modal; favorites persist across sessions
+- **Pipeline detail** — stages and jobs, including downstream/child pipelines (bridges)
+- **Job logs** — view a job's trace, with live tail/refresh while it is still running
+- **Resizable panels** — drag to resize the detail panels
+- **Project favorites** — bookmark projects via the Find modal (search by name or URL); favorites persist across sessions
 - **12 color themes** — One Dark, Catppuccin, Tokyo Night, Dracula, Nord, Gruvbox, Solarized, and more; live preview while browsing
+- **Settings** — theme and refresh interval, persisted to config
 - **GitLab API** — authenticated via personal access token (env var or config file)
 - **Mouse support** — every interactive element is clickable
 
 ## Installation
 
-Requires Rust 1.75+.
+### Install script (recommended)
+
+Downloads the prebuilt binary for your platform, verifies its checksum, and installs it to `~/.local/bin` — no sudo required:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ragamo/lazyglab/master/scripts/install.sh | sh
+```
+
+Make sure `~/.local/bin` is on your `PATH`. You can override the install location or pin a version:
+
+```bash
+INSTALL_DIR=~/bin VERSION=v0.1.0 \
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ragamo/lazyglab/master/scripts/install.sh)"
+```
+
+### Prebuilt binaries
+
+Grab the archive for your platform from the [latest release](https://github.com/ragamo/lazyglab/releases/latest) (Linux and macOS on x86_64/arm64, Windows on x86_64), extract it, and move the `lazyglab` binary somewhere on your `PATH`:
+
+```bash
+tar -xzf lazyglab-<target>.tar.gz
+mv lazyglab ~/.local/bin/
+```
+
+### From source
+
+Requires Rust 1.85+ (edition 2024).
 
 ```bash
 git clone https://github.com/ragamo/lazyglab
@@ -59,25 +93,3 @@ LAZYGLAB_TOKEN=glpat-xxx lazyglab
 | `q` / `Esc` | Quit |
 
 Mouse clicks work on all interactive elements: tabs, filters, project selector, find results, autoreload checkbox, logout, and settings.
-
-## Architecture
-
-```
-src/
-├── app.rs          # Application state machine and event dispatch
-├── auth.rs         # Token resolution (env var → config → modal)
-├── config/         # TOML config load/save
-├── event.rs        # Async event loop (crossterm + tokio::select!)
-├── provider/       # Provider trait + GitLab implementation
-│   ├── mod.rs      # Provider trait and error types
-│   ├── types.rs    # Shared domain types (MergeRequest, Pipeline, ...)
-│   └── gitlab.rs   # GitLab REST API client
-├── theme.rs        # Color palette definitions (12 themes)
-└── ui/             # Ratatui widgets
-    ├── main_view.rs    # Main layout: header, tabs, content, footer
-    ├── auth_modal.rs   # Token input modal
-    ├── find_modal.rs   # Project search modal
-    └── settings_modal.rs # Theme selector
-```
-
-The provider layer is designed to be extensible — a GitHub connector can be added by implementing the `Provider` trait.
