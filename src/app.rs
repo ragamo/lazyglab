@@ -10,6 +10,7 @@ use crate::provider::types::{ListMrParams, MergeRequest, MrState, Pipeline, Proj
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::theme::{self, Theme};
+use crate::ui::click_regions::ClickRegions;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppScreen {
@@ -88,6 +89,15 @@ impl MrFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusLayer {
+    Main,
+    MrDetail,
+    FindModal,
+    SettingsModal,
+    ProjectDropdown,
+}
+
 #[derive(Debug, Clone)]
 pub struct Project {
     pub id: u64,
@@ -124,8 +134,6 @@ pub struct App {
     pub autoreload_pipelines: bool,
     pub refresh_interval_secs: u64,
     pub last_pipeline_refresh: Option<Instant>,
-    pub autoreload_checkbox_area: Option<ratatui::prelude::Rect>,
-
     pub active_tab: Tab,
     pub mr_filter: MrFilter,
     pub projects: Vec<Project>,
@@ -144,8 +152,6 @@ pub struct App {
 
     pub config: AppConfig,
     pub http_client: reqwest::Client,
-    pub logout_link_area: Option<ratatui::prelude::Rect>,
-    pub settings_link_area: Option<ratatui::prelude::Rect>,
 
     // Settings modal
     pub settings_open: bool,
@@ -155,25 +161,16 @@ pub struct App {
     pub theme_confirmed: usize,
     pub theme: &'static Theme,
 
-    // Click areas (set during render)
-    pub tab_mr_area: Option<ratatui::prelude::Rect>,
-    pub tab_pipelines_area: Option<ratatui::prelude::Rect>,
-    pub project_selector_area: Option<ratatui::prelude::Rect>,
-    pub project_items_areas: Vec<ratatui::prelude::Rect>,
-    pub mr_filter_areas: Vec<ratatui::prelude::Rect>,
-    pub find_link_area: Option<ratatui::prelude::Rect>,
-    pub find_result_areas: Vec<ratatui::prelude::Rect>,
-    pub find_star_areas: Vec<ratatui::prelude::Rect>,
-    pub mr_row_areas: Vec<ratatui::prelude::Rect>,
+    // MR detail state
     pub selected_mr_index: Option<usize>,
-    pub mr_detail_close_area: Option<ratatui::prelude::Rect>,
     pub mr_detail_height: u16,
-    pub mr_detail_resize_area: Option<ratatui::prelude::Rect>,
     pub mr_detail_dragging: bool,
     pub mr_detail_tab: MrDetailTab,
     pub mr_detail_loading: bool,
     pub mr_detail_full: Option<MergeRequest>,
-    pub mr_detail_tab_areas: Vec<ratatui::prelude::Rect>,
+
+    // Click areas (grouped by region)
+    pub click_regions: ClickRegions,
 }
 
 impl App {
@@ -211,7 +208,6 @@ impl App {
             autoreload_pipelines: true,
             refresh_interval_secs: 30,
             last_pipeline_refresh: None,
-            autoreload_checkbox_area: None,
             active_tab: Tab::default(),
             mr_filter: MrFilter::default(),
             projects: config.gitlab.favorites.iter().map(|f| Project {
@@ -237,30 +233,25 @@ impl App {
             theme_selected,
             theme_confirmed: theme_selected,
             theme: active_theme,
-            tab_mr_area: None,
-            tab_pipelines_area: None,
-            project_selector_area: None,
-            project_items_areas: Vec::new(),
-            mr_filter_areas: Vec::new(),
-            logout_link_area: None,
-            settings_link_area: None,
-            find_link_area: None,
-            find_result_areas: Vec::new(),
-            find_star_areas: Vec::new(),
-            mr_row_areas: Vec::new(),
             selected_mr_index: None,
-            mr_detail_close_area: None,
             mr_detail_height: 0,
-            mr_detail_resize_area: None,
             mr_detail_dragging: false,
             mr_detail_tab: MrDetailTab::default(),
             mr_detail_loading: false,
             mr_detail_full: None,
-            mr_detail_tab_areas: Vec::new(),
+            click_regions: ClickRegions::default(),
         };
 
         app.try_auto_auth();
         app
+    }
+
+    pub fn active_layer(&self) -> FocusLayer {
+        if self.project_selector_open { return FocusLayer::ProjectDropdown; }
+        if self.find_modal_open { return FocusLayer::FindModal; }
+        if self.settings_open { return FocusLayer::SettingsModal; }
+        if self.selected_mr_index.is_some() { return FocusLayer::MrDetail; }
+        FocusLayer::Main
     }
 
     fn try_auto_auth(&mut self) {
@@ -532,15 +523,11 @@ impl App {
 
         let pos = (mouse.column, mouse.row);
 
-        // Handle drag-to-resize
+        // Handle drag-to-resize (global — active regardless of layer)
         if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
             if self.mr_detail_dragging {
-                // The resize bar is at the top of the detail panel.
-                // pos.row is where the mouse is — that becomes the new split point.
-                // detail_height = total_content_height - pos.row + content_start
-                // We store height directly from the mouse row relative to the screen.
-                let content_start = 5u16; // header(3) + tabs(1) + filters(1)
-                let screen_height = self.mr_detail_resize_area
+                let content_start = 5u16;
+                let screen_height = self.click_regions.mr_detail.resize
                     .map(|a| a.y + self.mr_detail_height)
                     .unwrap_or(24);
                 let new_height = screen_height.saturating_sub(pos.1);
@@ -558,74 +545,67 @@ impl App {
             return;
         }
 
-        if self.project_selector_open {
-            for (i, area) in self.project_items_areas.iter().enumerate() {
-                if hit(pos, *area) {
-                    self.selected_project = i;
-                    self.project_selector_open = false;
-                    self.load_merge_requests();
-                    self.load_pipelines();
-                    return;
-                }
-            }
-            self.project_selector_open = false;
-            return;
+        match self.active_layer() {
+            FocusLayer::ProjectDropdown => self.handle_mouse_dropdown(pos),
+            FocusLayer::FindModal       => self.handle_mouse_find(pos),
+            FocusLayer::SettingsModal   => self.handle_mouse_settings(pos),
+            FocusLayer::MrDetail        => self.handle_mouse_detail(pos),
+            FocusLayer::Main            => self.handle_mouse_main(pos),
         }
+    }
 
-        if let Some(area) = self.project_selector_area {
-            if hit(pos, area) {
-                self.project_selector_open = true;
-                return;
-            }
-        }
-
-        if let Some(area) = self.logout_link_area {
-            if hit(pos, area) {
-                self.logout();
-                return;
-            }
-        }
-
-        if let Some(area) = self.settings_link_area {
-            if hit(pos, area) {
-                self.settings_open = true;
-                return;
-            }
-        }
-
-        if let Some(area) = self.tab_mr_area {
-            if hit(pos, area) {
-                self.active_tab = Tab::MergeRequests;
-                return;
-            }
-        }
-
-        if let Some(area) = self.tab_pipelines_area {
-            if hit(pos, area) {
-                self.active_tab = Tab::Pipelines;
-                return;
-            }
-        }
-
-        if self.active_tab == Tab::Pipelines {
-            if let Some(area) = self.autoreload_checkbox_area {
-                if hit(pos, area) {
-                    self.autoreload_pipelines = !self.autoreload_pipelines;
-                    return;
-                }
-            }
-        }
-
-        for (i, area) in self.mr_filter_areas.iter().enumerate() {
+    fn handle_mouse_dropdown(&mut self, pos: (u16, u16)) {
+        for (i, area) in self.click_regions.project_dropdown.items.iter().enumerate() {
             if hit(pos, *area) {
-                if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
-                    self.mr_filter = f.clone();
+                self.selected_project = i;
+                self.project_selector_open = false;
+                self.load_merge_requests();
+                self.load_pipelines();
+                return;
+            }
+        }
+        self.project_selector_open = false;
+    }
+
+    fn handle_mouse_find(&mut self, pos: (u16, u16)) {
+        for (i, area) in self.click_regions.find_modal.star_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                if let Some(project) = self.find_results.get(i).cloned() {
+                    if project.is_favorite {
+                        self.remove_favorite(project.id);
+                    } else {
+                        self.add_favorite(&project);
+                    }
                 }
                 return;
             }
         }
+        for (i, area) in self.click_regions.find_modal.result_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                self.find_selected = i;
+                if let Some(project) = self.find_results.get(i).cloned() {
+                    self.add_favorite(&project);
+                    self.selected_project = self
+                        .projects
+                        .iter()
+                        .position(|p| p.id == project.id)
+                        .unwrap_or(0);
+                    self.find_modal_open = false;
+                    self.load_merge_requests();
+                }
+                return;
+            }
+        }
+        // Click outside modal bounds — consume (don't pass through)
+    }
 
-        for (i, area) in self.mr_detail_tab_areas.iter().enumerate() {
+    fn handle_mouse_settings(&mut self, _pos: (u16, u16)) {
+        // Consume all clicks while settings is open (block pass-through)
+    }
+
+    fn handle_mouse_detail(&mut self, pos: (u16, u16)) {
+        // Detail-specific areas
+        for (i, area) in self.click_regions.mr_detail.tab_areas.iter().enumerate() {
             if hit(pos, *area) {
                 if let Some(tab) = MrDetailTab::ALL.get(i) {
                     self.mr_detail_tab = tab.clone();
@@ -634,7 +614,7 @@ impl App {
             }
         }
 
-        if let Some(area) = self.mr_detail_close_area {
+        if let Some(area) = self.click_regions.mr_detail.close {
             if hit(pos, area) {
                 self.selected_mr_index = None;
                 self.mr_detail_full = None;
@@ -643,31 +623,65 @@ impl App {
             }
         }
 
-        if let Some(area) = self.mr_detail_resize_area {
+        if let Some(area) = self.click_regions.mr_detail.resize {
             if hit(pos, area) {
                 self.mr_detail_dragging = true;
                 return;
             }
         }
 
-        if self.active_tab == Tab::MergeRequests {
-            for (i, area) in self.mr_row_areas.iter().enumerate() {
-                if hit(pos, *area) {
-                    if self.selected_mr_index == Some(i) {
-                        self.selected_mr_index = None;
-                        self.mr_detail_full = None;
-                        self.mr_detail_tab = MrDetailTab::default();
-                    } else {
-                        self.selected_mr_index = Some(i);
-                        self.mr_detail_tab = MrDetailTab::default();
-                        self.load_mr_detail();
-                    }
-                    return;
-                }
+        // If click is within the detail panel bounds, consume it
+        if let Some(bounds) = self.click_regions.mr_detail.bounds {
+            if hit(pos, bounds) {
+                return;
             }
         }
 
-        if let Some(area) = self.find_link_area {
+        // Click is above the detail panel — fall through to shared areas
+        self.handle_mouse_shared(pos);
+    }
+
+    fn handle_mouse_main(&mut self, pos: (u16, u16)) {
+        self.handle_mouse_shared(pos);
+    }
+
+    fn handle_mouse_shared(&mut self, pos: (u16, u16)) {
+        if let Some(area) = self.click_regions.header.project_selector {
+            if hit(pos, area) {
+                self.project_selector_open = true;
+                return;
+            }
+        }
+
+        if let Some(area) = self.click_regions.header.logout_link {
+            if hit(pos, area) {
+                self.logout();
+                return;
+            }
+        }
+
+        if let Some(area) = self.click_regions.header.settings_link {
+            if hit(pos, area) {
+                self.settings_open = true;
+                return;
+            }
+        }
+
+        if let Some(area) = self.click_regions.header.tab_mr {
+            if hit(pos, area) {
+                self.active_tab = Tab::MergeRequests;
+                return;
+            }
+        }
+
+        if let Some(area) = self.click_regions.header.tab_pipelines {
+            if hit(pos, area) {
+                self.active_tab = Tab::Pipelines;
+                return;
+            }
+        }
+
+        if let Some(area) = self.click_regions.header.find_link {
             if hit(pos, area) {
                 self.find_modal_open = true;
                 self.find_input.clear();
@@ -677,31 +691,35 @@ impl App {
             }
         }
 
-        if self.find_modal_open {
-            for (i, area) in self.find_star_areas.iter().enumerate() {
-                if hit(pos, *area) {
-                    if let Some(project) = self.find_results.get(i).cloned() {
-                        if project.is_favorite {
-                            self.remove_favorite(project.id);
-                        } else {
-                            self.add_favorite(&project);
-                        }
-                    }
+        if self.active_tab == Tab::Pipelines {
+            if let Some(area) = self.click_regions.main.autoreload_checkbox {
+                if hit(pos, area) {
+                    self.autoreload_pipelines = !self.autoreload_pipelines;
                     return;
                 }
             }
-            for (i, area) in self.find_result_areas.iter().enumerate() {
+        }
+
+        for (i, area) in self.click_regions.main.mr_filter_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
+                    self.mr_filter = f.clone();
+                }
+                return;
+            }
+        }
+
+        if self.active_tab == Tab::MergeRequests {
+            for (i, area) in self.click_regions.main.mr_row_areas.iter().enumerate() {
                 if hit(pos, *area) {
-                    self.find_selected = i;
-                    if let Some(project) = self.find_results.get(i).cloned() {
-                        self.add_favorite(&project);
-                        self.selected_project = self
-                            .projects
-                            .iter()
-                            .position(|p| p.id == project.id)
-                            .unwrap_or(0);
-                        self.find_modal_open = false;
-                        self.load_merge_requests();
+                    if self.selected_mr_index == Some(i) {
+                        self.selected_mr_index = None;
+                        self.mr_detail_full = None;
+                        self.mr_detail_tab = MrDetailTab::default();
+                    } else {
+                        self.selected_mr_index = Some(i);
+                        self.mr_detail_tab = MrDetailTab::default();
+                        self.load_mr_detail();
                     }
                     return;
                 }

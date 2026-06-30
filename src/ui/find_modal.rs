@@ -114,8 +114,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    app.find_result_areas = result_areas;
-    app.find_star_areas = star_areas;
+    app.click_regions.find_modal.bounds = Some(area);
+    app.click_regions.find_modal.result_areas = result_areas;
+    app.click_regions.find_modal.star_areas = star_areas;
 
     let list = List::new(items);
     frame.render_widget(list, results_area);

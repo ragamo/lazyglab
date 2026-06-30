@@ -68,7 +68,7 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
         height: header_layout[0].height,
     };
     frame.render_widget(selector, selector_area);
-    app.project_selector_area = Some(selector_area);
+    app.click_regions.header.project_selector = Some(selector_area);
 
     let find_link = Paragraph::new(Span::styled(
         " Find",
@@ -81,7 +81,7 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
         height: 1,
     };
     frame.render_widget(find_link, find_area);
-    app.find_link_area = Some(find_area);
+    app.click_regions.header.find_link = Some(find_area);
 
     let right_area = header_layout[1];
 
@@ -106,14 +106,12 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     // logout click area: last ~8 chars on the right
     if app.current_user.is_some() {
         let logout_width = 8u16;
-        app.logout_link_area = Some(Rect {
+        app.click_regions.header.logout_link = Some(Rect {
             x: right_area.x + right_area.width.saturating_sub(logout_width + 1),
             y: right_area.y,
             width: logout_width,
             height: right_area.height,
         });
-    } else {
-        app.logout_link_area = None;
     }
 }
 
@@ -154,11 +152,11 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(pipe_tab, tabs_layout[1]);
     frame.render_widget(settings_link, tabs_layout[2]);
 
-    app.tab_mr_area = Some(tabs_layout[0]);
-    app.tab_pipelines_area = Some(tabs_layout[1]);
+    app.click_regions.header.tab_mr = Some(tabs_layout[0]);
+    app.click_regions.header.tab_pipelines = Some(tabs_layout[1]);
 
     let settings_width = 9u16;
-    app.settings_link_area = Some(Rect {
+    app.click_regions.header.settings_link = Some(Rect {
         x: tabs_layout[2].x + tabs_layout[2].width.saturating_sub(settings_width),
         y: tabs_layout[2].y,
         width: settings_width,
@@ -186,7 +184,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 // Extend resize area to also cover the bottom border of the table
                 let table_bottom_row = splits[0].y + splits[0].height.saturating_sub(1);
-                app.mr_detail_resize_area = Some(Rect {
+                app.click_regions.mr_detail.resize = Some(Rect {
                     x: splits[1].x,
                     y: table_bottom_row,
                     width: splits[1].width,
@@ -299,7 +297,7 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Register click areas for each visible row (skip header + margin)
     let row_start_y = content_area.y + 3; // border + header + margin
-    app.mr_row_areas = filtered
+    app.click_regions.main.mr_row_areas = filtered
         .iter()
         .enumerate()
         .map(|(i, _)| Rect {
@@ -326,12 +324,13 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Drag resize area = top border row
-    app.mr_detail_resize_area = Some(Rect {
+    app.click_regions.mr_detail.resize = Some(Rect {
         x: area.x,
         y: area.y,
         width: area.width,
         height: 1,
     });
+    app.click_regions.mr_detail.bounds = Some(area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -352,7 +351,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(Span::styled("[X]", Style::default().fg(t.text_dim))),
         close_area,
     );
-    app.mr_detail_close_area = Some(close_area);
+    app.click_regions.mr_detail.close = Some(close_area);
 
     // Split inner: tabs row + blank line + content
     let inner_chunks = Layout::vertical([
@@ -389,7 +388,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    app.mr_detail_tab_areas = tab_areas;
+    app.click_regions.mr_detail.tab_areas = tab_areas;
     frame.render_widget(Paragraph::new(Line::from(tab_spans)), tab_row);
 
     // Render content
@@ -527,7 +526,7 @@ fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    app.mr_filter_areas = filter_areas;
+    app.click_regions.main.mr_filter_areas = filter_areas;
 
     let paragraph = Paragraph::new(Line::from(spans));
     frame.render_widget(paragraph, area);
@@ -570,7 +569,7 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Paragraph::new(hints), top);
 
     // checkbox click area: covers "☑ autoreload" (13 chars)
-    app.autoreload_checkbox_area = Some(Rect { x: top.x, y: top.y, width: 14, height: 1 });
+    app.click_regions.main.autoreload_checkbox = Some(Rect { x: top.x, y: top.y, width: 14, height: 1 });
 
     let content_area = chunks[1];
 
@@ -703,7 +702,8 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
 
     frame.render_widget(list, dropdown_area);
 
-    app.project_items_areas = (0..app.projects.len())
+    app.click_regions.project_dropdown.bounds = Some(dropdown_area);
+    app.click_regions.project_dropdown.items = (0..app.projects.len())
         .map(|i| Rect {
             x: dropdown_area.x + 1,
             y: dropdown_area.y + 1 + i as u16,
