@@ -419,6 +419,12 @@ impl App {
                                 Tab::Pipelines => Tab::MergeRequests,
                             };
                         }
+                        KeyCode::Left if self.mr_detail_open => {
+                            self.cycle_mr_detail_tab_back();
+                        }
+                        KeyCode::Right if self.mr_detail_open => {
+                            self.cycle_mr_detail_tab_forward();
+                        }
                         KeyCode::Left if self.active_tab == Tab::MergeRequests => {
                             self.cycle_mr_filter_back();
                         }
@@ -534,6 +540,18 @@ impl App {
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + filters.len() - 1) % filters.len()].clone();
         self.close_mr_detail();
+    }
+
+    fn cycle_mr_detail_tab_forward(&mut self) {
+        let all = MrDetailTab::ALL;
+        let idx = all.iter().position(|t| *t == self.mr_detail_tab).unwrap_or(0);
+        self.mr_detail_tab = all[(idx + 1) % all.len()].clone();
+    }
+
+    fn cycle_mr_detail_tab_back(&mut self) {
+        let all = MrDetailTab::ALL;
+        let idx = all.iter().position(|t| *t == self.mr_detail_tab).unwrap_or(0);
+        self.mr_detail_tab = all[(idx + all.len() - 1) % all.len()].clone();
     }
 
     fn close_mr_detail(&mut self) {
