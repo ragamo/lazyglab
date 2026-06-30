@@ -170,7 +170,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
             if app.mr_detail_open {
                 // Init height on first open
                 if app.mr_detail_height == 0 {
-                    app.mr_detail_height = (area.height * 65 / 100).max(14);
+                    app.mr_detail_height = (area.height * 70 / 100).max(14);
                 }
                 let detail_height = app.mr_detail_height.min(area.height.saturating_sub(6));
                 let table_height = area.height.saturating_sub(detail_height);
@@ -198,7 +198,7 @@ fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
         Tab::Pipelines => {
             if app.pipeline_detail_open {
                 if app.pipeline_detail_height == 0 {
-                    app.pipeline_detail_height = (area.height * 65 / 100).max(14);
+                    app.pipeline_detail_height = (area.height * 70 / 100).max(14);
                 }
                 let detail_height = app.pipeline_detail_height.min(area.height.saturating_sub(6));
                 let table_height = area.height.saturating_sub(detail_height);
@@ -381,15 +381,16 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
 
-    let filtered: Vec<&_> = app
-        .merge_requests
-        .iter()
-        .filter(|mr| app.mr_filter.matches(&mr.state))
-        .collect();
-
-    let mr = match app.mr_nav.selected.and_then(|i| filtered.get(i)) {
-        Some(mr) => *mr,
-        None => return,
+    let mr = {
+        let filtered: Vec<&_> = app
+            .merge_requests
+            .iter()
+            .filter(|mr| app.mr_filter.matches(&mr.state))
+            .collect();
+        match app.mr_nav.selected.and_then(|i| filtered.get(i)) {
+            Some(mr) => (*mr).clone(),
+            None => return,
+        }
     };
 
     // Drag resize area = top border row
@@ -463,7 +464,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render content
     let content_area = inner_chunks[2]; // [1] is blank line
     match app.mr_detail_tab {
-        crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, mr, content_area),
+        crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, &mr, content_area),
         _ => {
             let placeholder = Paragraph::new(Span::styled(
                 "coming soon",
@@ -476,7 +477,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_mr_overview(
     frame: &mut Frame,
-    app: &App,
+    app: &mut App,
     mr: &crate::provider::types::MergeRequest,
     area: Rect,
 ) {
@@ -490,65 +491,47 @@ fn render_mr_overview(
         _ => t.border,
     };
 
-    // Split: metadata (left) | description (right)
-    let cols = Layout::horizontal([
-        Constraint::Length(36),
-        Constraint::Min(0),
-    ])
-    .split(area);
+    let time_ago = format_time_ago(&mr.updated_at);
 
-    // Left: metadata
-    let meta_lines = vec![
+    let lines = vec![
+        // Title
         Line::from(vec![
             Span::styled(format!("!{}", mr.iid), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
             Span::styled("  ", Style::default()),
             Span::styled(mr.title.clone(), Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
         ]),
-        Line::from(""),
+        // Metadata line
         Line::from(vec![
-            Span::styled("author   ", Style::default().fg(t.text_dim)),
             Span::styled(format!("@{}", mr.author.username), Style::default().fg(t.warning)),
-        ]),
-        Line::from(vec![
-            Span::styled("state    ", Style::default().fg(t.text_dim)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
             Span::styled(mr.state.clone(), Style::default().fg(status_color)),
-        ]),
-        Line::from(vec![
-            Span::styled("from     ", Style::default().fg(t.text_dim)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
             Span::styled(mr.source_branch.clone(), Style::default().fg(t.info)),
-        ]),
-        Line::from(vec![
-            Span::styled("into     ", Style::default().fg(t.text_dim)),
+            Span::styled(" → ", Style::default().fg(t.text_dim)),
             Span::styled(mr.target_branch.clone(), Style::default().fg(t.info)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled(time_ago, Style::default().fg(t.text_dim)),
         ]),
-        Line::from(vec![
-            Span::styled("updated  ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.updated_at[..10].to_string(), Style::default().fg(t.text)),
-        ]),
-        Line::from(vec![
-            Span::styled("created  ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.created_at[..10].to_string(), Style::default().fg(t.text)),
-        ]),
+        // URL
+        Line::from(Span::styled(mr.web_url.clone(), Style::default().fg(t.text_dim))),
+        // Blank line
         Line::from(""),
-        Line::from(vec![
-            Span::styled("url      ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.web_url.clone(), Style::default().fg(t.accent)),
-        ]),
     ];
-    frame.render_widget(Paragraph::new(meta_lines), cols[0]);
 
-    // Right: description
-    let desc_block = Block::default()
-        .borders(Borders::LEFT)
-        .border_style(Style::default().fg(t.border));
+    let header_height = lines.len() as u16;
+    let chunks = Layout::vertical([
+        Constraint::Length(header_height),
+        Constraint::Min(0),
+    ])
+    .split(area);
 
-    let desc_inner = desc_block.inner(cols[1]);
-    frame.render_widget(desc_block, cols[1]);
+    frame.render_widget(Paragraph::new(lines), chunks[0]);
 
+    // Description
     if app.mr_detail_loading {
         frame.render_widget(
-            Paragraph::new(Span::styled("Loading description...", Style::default().fg(t.text_dim))),
-            desc_inner,
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            chunks[1],
         );
     } else {
         let desc_text = app
@@ -558,10 +541,77 @@ fn render_mr_overview(
             .filter(|d| !d.trim().is_empty())
             .unwrap_or("No description");
 
-        let desc = Paragraph::new(desc_text)
+        let md = tui_markdown::from_str(desc_text);
+        let desc_area = chunks[1];
+        let visible_height = desc_area.height as u16;
+        let content_height = md.lines.len() as u16;
+
+        // Clamp scroll so content doesn't scroll past the end
+        let max_scroll = content_height.saturating_sub(visible_height);
+        if app.mr_desc_scroll > max_scroll {
+            app.mr_desc_scroll = max_scroll;
+        }
+
+        let desc = Paragraph::new(md)
             .style(Style::default().fg(t.text))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(desc, desc_inner);
+            .wrap(Wrap { trim: false })
+            .scroll((app.mr_desc_scroll, 0));
+        frame.render_widget(desc, desc_area);
+
+        // Scrollbar
+        if content_height > visible_height {
+            let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+                .position(app.mr_desc_scroll as usize);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_style(Style::default().fg(t.border))
+                .thumb_style(Style::default().fg(t.accent));
+            let scrollbar_area = Rect {
+                x: desc_area.x + desc_area.width.saturating_sub(1),
+                y: desc_area.y,
+                width: 1,
+                height: desc_area.height,
+            };
+            frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+        }
+    }
+}
+
+fn format_time_ago(date_str: &str) -> String {
+    let date_part = &date_str[..10]; // "YYYY-MM-DD"
+    let parts: Vec<&str> = date_part.split('-').collect();
+    if parts.len() != 3 { return date_part.to_string(); }
+    let (y, m, d) = match (parts[0].parse::<i64>(), parts[1].parse::<i64>(), parts[2].parse::<i64>()) {
+        (Ok(y), Ok(m), Ok(d)) => (y, m, d),
+        _ => return date_part.to_string(),
+    };
+    // Approximate days since epoch for comparison
+    let date_days = y * 365 + m * 30 + d;
+    let now_days = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        (now / 86400) as i64
+    };
+    // Convert epoch days from 1970 base to same scale
+    let epoch_offset = 1970 * 365 + 1 * 30 + 1;
+    let diff = now_days - (date_days - epoch_offset);
+    if diff < 0 {
+        date_part.to_string()
+    } else if diff == 0 {
+        "today".to_string()
+    } else if diff == 1 {
+        "yesterday".to_string()
+    } else if diff < 30 {
+        format!("{} days ago", diff)
+    } else if diff < 365 {
+        let months = diff / 30;
+        if months == 1 { "1 month ago".to_string() } else { format!("{} months ago", months) }
+    } else {
+        let years = diff / 365;
+        if years == 1 { "1 year ago".to_string() } else { format!("{} years ago", years) }
     }
 }
 

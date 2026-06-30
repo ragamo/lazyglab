@@ -173,6 +173,7 @@ pub struct App {
     pub mr_detail_tab: MrDetailTab,
     pub mr_detail_loading: bool,
     pub mr_detail_full: Option<MergeRequest>,
+    pub mr_desc_scroll: u16,
 
     // Pipeline detail state
     pub pipeline_detail_open: bool,
@@ -250,6 +251,7 @@ impl App {
             mr_detail_tab: MrDetailTab::default(),
             mr_detail_loading: false,
             mr_detail_full: None,
+            mr_desc_scroll: 0,
             pipeline_detail_open: false,
             pipeline_detail_height: 0,
             click_regions: ClickRegions::default(),
@@ -606,6 +608,14 @@ impl App {
 
         if mouse.kind == MouseEventKind::ScrollDown {
             if !self.find_modal_open && !self.settings_open {
+                if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
+                    if let Some(bounds) = self.click_regions.mr_detail.bounds {
+                        if hit(pos, bounds) {
+                            self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3);
+                            return;
+                        }
+                    }
+                }
                 match self.active_tab {
                     Tab::MergeRequests => self.mr_nav.scroll_down(self.filtered_mr_count()),
                     Tab::Pipelines => self.pipeline_nav.scroll_down(self.pipelines.len()),
@@ -616,6 +626,14 @@ impl App {
 
         if mouse.kind == MouseEventKind::ScrollUp {
             if !self.find_modal_open && !self.settings_open {
+                if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
+                    if let Some(bounds) = self.click_regions.mr_detail.bounds {
+                        if hit(pos, bounds) {
+                            self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3);
+                            return;
+                        }
+                    }
+                }
                 match self.active_tab {
                     Tab::MergeRequests => self.mr_nav.scroll_up(),
                     Tab::Pipelines => self.pipeline_nav.scroll_up(),
@@ -1008,6 +1026,7 @@ impl App {
         self.mr_detail_open = true;
         self.mr_detail_loading = true;
         self.mr_detail_full = None;
+        self.mr_desc_scroll = 0;
 
         let tx = self.message_tx.clone();
         let client = self.http_client.clone();
