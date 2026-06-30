@@ -251,11 +251,24 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    // Clamp offset to valid range
+    let visible_rows = content_area.height.saturating_sub(4) as usize; // border + header + margin + border
+    if app.mr_list_offset >= filtered.len() {
+        app.mr_list_offset = filtered.len().saturating_sub(1);
+    }
+
+    let visible_filtered: Vec<&_> = filtered
+        .iter()
+        .skip(app.mr_list_offset)
+        .take(visible_rows)
+        .copied()
+        .collect();
+
     let header = Row::new(vec!["IID", "Title", "Author", "Branch", "Updated"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
-    let rows: Vec<Row> = filtered
+    let rows: Vec<Row> = visible_filtered
         .iter()
         .map(|mr| {
             let status_color = match mr.state.as_str() {
@@ -275,6 +288,12 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
+    let scroll_indicator = if filtered.len() > visible_rows {
+        format!(" {}-{}/{} ", app.mr_list_offset + 1, (app.mr_list_offset + visible_filtered.len()).min(filtered.len()), filtered.len())
+    } else {
+        String::new()
+    };
+
     let table = Table::new(
         rows,
         [
@@ -290,14 +309,16 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(t.border)),
+            .border_style(Style::default().fg(t.border))
+            .title_bottom(Line::from(scroll_indicator).right_aligned())
+            .title_style(Style::default().fg(t.text_dim)),
     );
 
     frame.render_widget(table, content_area);
 
-    // Register click areas for each visible row (skip header + margin)
+    // Register click areas for visible rows (indices map to filtered[offset + i])
     let row_start_y = content_area.y + 3; // border + header + margin
-    app.click_regions.main.mr_row_areas = filtered
+    app.click_regions.main.mr_row_areas = visible_filtered
         .iter()
         .enumerate()
         .map(|(i, _)| Rect {

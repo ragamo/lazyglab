@@ -161,6 +161,9 @@ pub struct App {
     pub theme_confirmed: usize,
     pub theme: &'static Theme,
 
+    // MR list scroll
+    pub mr_list_offset: usize,
+
     // MR detail state
     pub selected_mr_index: Option<usize>,
     pub mr_detail_height: u16,
@@ -233,6 +236,7 @@ impl App {
             theme_selected,
             theme_confirmed: theme_selected,
             theme: active_theme,
+            mr_list_offset: 0,
             selected_mr_index: None,
             mr_detail_height: 0,
             mr_detail_dragging: false,
@@ -252,6 +256,22 @@ impl App {
         if self.settings_open { return FocusLayer::SettingsModal; }
         if self.selected_mr_index.is_some() { return FocusLayer::MrDetail; }
         FocusLayer::Main
+    }
+
+    fn mr_list_scroll_down(&mut self) {
+        let filtered_count = self.merge_requests.iter()
+            .filter(|mr| self.mr_filter.matches(&mr.state))
+            .count();
+        if self.mr_list_offset + 1 < filtered_count {
+            self.mr_list_offset += 3;
+            if self.mr_list_offset >= filtered_count {
+                self.mr_list_offset = filtered_count.saturating_sub(1);
+            }
+        }
+    }
+
+    fn mr_list_scroll_up(&mut self) {
+        self.mr_list_offset = self.mr_list_offset.saturating_sub(3);
     }
 
     fn try_auto_auth(&mut self) {
@@ -452,12 +472,14 @@ impl App {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + 1) % filters.len()].clone();
+        self.mr_list_offset = 0;
     }
 
     fn cycle_mr_filter_back(&mut self) {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + filters.len() - 1) % filters.len()].clone();
+        self.mr_list_offset = 0;
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -538,6 +560,20 @@ impl App {
 
         if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
             self.mr_detail_dragging = false;
+            return;
+        }
+
+        if mouse.kind == MouseEventKind::ScrollDown {
+            if self.active_tab == Tab::MergeRequests && !self.find_modal_open && !self.settings_open {
+                self.mr_list_scroll_down();
+            }
+            return;
+        }
+
+        if mouse.kind == MouseEventKind::ScrollUp {
+            if self.active_tab == Tab::MergeRequests && !self.find_modal_open && !self.settings_open {
+                self.mr_list_scroll_up();
+            }
             return;
         }
 
@@ -704,6 +740,7 @@ impl App {
             if hit(pos, *area) {
                 if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
                     self.mr_filter = f.clone();
+                    self.mr_list_offset = 0;
                 }
                 return;
             }
@@ -712,12 +749,13 @@ impl App {
         if self.active_tab == Tab::MergeRequests {
             for (i, area) in self.click_regions.main.mr_row_areas.iter().enumerate() {
                 if hit(pos, *area) {
-                    if self.selected_mr_index == Some(i) {
+                    let actual_index = self.mr_list_offset + i;
+                    if self.selected_mr_index == Some(actual_index) {
                         self.selected_mr_index = None;
                         self.mr_detail_full = None;
                         self.mr_detail_tab = MrDetailTab::default();
                     } else {
-                        self.selected_mr_index = Some(i);
+                        self.selected_mr_index = Some(actual_index);
                         self.mr_detail_tab = MrDetailTab::default();
                         self.load_mr_detail();
                     }
@@ -854,6 +892,7 @@ impl App {
         };
         self.mrs_loading = true;
         self.merge_requests.clear();
+        self.mr_list_offset = 0;
 
         let tx = self.message_tx.clone();
         let client = self.http_client.clone();
