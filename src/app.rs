@@ -202,6 +202,7 @@ pub struct App {
     pub job_log: String,
     pub job_log_scroll: u16,
     pub selected_job_id: Option<u64>,
+    pub selected_job_name: Option<String>,
     pub job_log_is_refresh: bool,
 
     // Auto-refresh
@@ -296,6 +297,7 @@ impl App {
             job_log: String::new(),
             job_log_scroll: 0,
             selected_job_id: None,
+            selected_job_name: None,
             job_log_is_refresh: false,
             tick_frame: 0,
             settings_refresh_interval: refresh_interval,
@@ -864,14 +866,14 @@ impl App {
 
         // Job click areas (MR Pipelines tab)
         if self.mr_detail_tab == MrDetailTab::Pipelines {
-            let job_areas: Vec<(Rect, u64)> = self.click_regions.mr_detail.job_areas.clone();
-            for (area, job_id) in job_areas {
+            let job_areas: Vec<(Rect, u64, String)> = self.click_regions.mr_detail.job_areas.clone();
+            for (area, job_id, job_name) in job_areas {
                 if hit(pos, area) {
                     if self.selected_job_id == Some(job_id) && self.job_log_open {
                         self.job_log_open = false;
                         self.selected_job_id = None;
                     } else {
-                        self.load_job_log(job_id);
+                        self.load_job_log(job_id, job_name);
                     }
                     return;
                 }
@@ -990,14 +992,14 @@ impl App {
 
             // Job click areas
             if self.pipeline_detail_open {
-                let job_areas: Vec<(Rect, u64)> = self.click_regions.pipeline_detail.job_areas.clone();
-                for (area, job_id) in job_areas {
+                let job_areas: Vec<(Rect, u64, String)> = self.click_regions.pipeline_detail.job_areas.clone();
+                for (area, job_id, job_name) in job_areas {
                     if hit(pos, area) {
                         if self.selected_job_id == Some(job_id) && self.job_log_open {
                             self.job_log_open = false;
                             self.selected_job_id = None;
                         } else {
-                            self.load_job_log(job_id);
+                            self.load_job_log(job_id, job_name);
                         }
                         return;
                     }
@@ -1225,12 +1227,13 @@ impl App {
         });
     }
 
-    pub fn load_job_log(&mut self, job_id: u64) {
+    pub fn load_job_log(&mut self, job_id: u64, job_name: String) {
         let project = match self.projects.get(self.selected_project) {
             Some(p) => p.clone(),
             None => return,
         };
         self.selected_job_id = Some(job_id);
+        self.selected_job_name = Some(job_name);
         self.job_log_open = true;
         self.job_log_loading = true;
         self.job_log.clear();

@@ -755,7 +755,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                         y: list_area.y + visible_row as u16,
                         width: list_area.width,
                         height: 1,
-                    }, job.id));
+                    }, job.id, job.name.clone()));
                 }
                 line_idx += 1;
 
@@ -781,7 +781,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                             y: list_area.y + visible_row as u16,
                             width: list_area.width,
                             height: 1,
-                        }, sub.id));
+                        }, sub.id, sub.name.clone()));
                     }
                     line_idx += 1;
                 }
@@ -1113,7 +1113,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     // Build stage/job lines with click area tracking
     let stages = enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages);
     let mut job_lines: Vec<Line> = Vec::new();
-    let mut job_areas: Vec<(Rect, u64)> = Vec::new();
+    let mut job_areas: Vec<(Rect, u64, String)> = Vec::new();
     let row_start = detail_area.y + header_height;
     let scroll = app.pipeline_detail_scroll;
 
@@ -1170,7 +1170,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                     y: row_start + visible_row as u16,
                     width: detail_area.width,
                     height: 1,
-                }, job.id));
+                }, job.id, job.name.clone()));
             }
             line_idx += 1;
 
@@ -1200,7 +1200,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                         y: row_start + visible_row as u16,
                         width: detail_area.width,
                         height: 1,
-                    }, sub.id));
+                    }, sub.id, sub.name.clone()));
                 }
                 line_idx += 1;
             }
@@ -1238,7 +1238,8 @@ fn render_job_log(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Header row with full background
     let header_area = chunks[0];
-    let title = " job log";
+    let job_name = app.selected_job_name.as_deref().unwrap_or("job log");
+    let title = format!(" log: {}", job_name);
     let close = "[X]";
     let padding = (header_area.width as usize)
         .saturating_sub(title.len() + close.len());
