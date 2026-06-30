@@ -423,16 +423,49 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.click_regions.mr_detail.close = Some(close_area);
 
-    // Split inner: tabs row + blank line + content
+    let status_color = match mr.state.as_str() {
+        "opened" => t.success,
+        "merged" => t.highlight,
+        "closed" => t.error,
+        _ => t.border,
+    };
+    let time_ago = format_time_ago(&mr.updated_at);
+    let summary_lines = vec![
+        Line::from(vec![
+            Span::styled(format!("!{}", mr.iid), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Span::styled("  ", Style::default()),
+            Span::styled(mr.title.clone(), Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("@{}", mr.author.username), Style::default().fg(t.warning)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.state.clone(), Style::default().fg(status_color)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.source_branch.clone(), Style::default().fg(t.info)),
+            Span::styled(" → ", Style::default().fg(t.text_dim)),
+            Span::styled(mr.target_branch.clone(), Style::default().fg(t.info)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled(time_ago, Style::default().fg(t.text_dim)),
+        ]),
+        Line::from(Span::styled(mr.web_url.clone(), Style::default().fg(t.text_dim))),
+    ];
+    let summary_height = summary_lines.len() as u16;
+
+    // Split inner: summary + blank + tabs + separator + content
     let inner_chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
+        Constraint::Length(summary_height),     // summary
+        Constraint::Length(1),                  // blank
+        Constraint::Length(1),                  // tabs row
+        Constraint::Length(1),                  // separator
+        Constraint::Min(0),                     // content
     ])
     .split(inner);
 
+    // Render summary (always visible)
+    frame.render_widget(Paragraph::new(summary_lines), inner_chunks[0]);
+
     // Render tabs
-    let tab_row = inner_chunks[0];
+    let tab_row = inner_chunks[2];
     let mut x_offset = tab_row.x;
     let mut tab_areas = Vec::new();
 
@@ -461,8 +494,17 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     app.click_regions.mr_detail.tab_areas = tab_areas;
     frame.render_widget(Paragraph::new(Line::from(tab_spans)), tab_row);
 
+    // Separator
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "─".repeat(inner.width as usize),
+            Style::default().fg(t.border),
+        )),
+        inner_chunks[3],
+    );
+
     // Render content
-    let content_area = inner_chunks[2]; // [1] is blank line
+    let content_area = inner_chunks[4];
     match app.mr_detail_tab {
         crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, &mr, content_area),
         crate::app::MrDetailTab::Commits => render_mr_commits(frame, app, content_area),
@@ -480,60 +522,17 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_mr_overview(
     frame: &mut Frame,
     app: &mut App,
-    mr: &crate::provider::types::MergeRequest,
+    _mr: &crate::provider::types::MergeRequest,
     area: Rect,
 ) {
     use ratatui::widgets::Wrap;
     let t = app.theme;
 
-    let status_color = match mr.state.as_str() {
-        "opened" => t.success,
-        "merged" => t.highlight,
-        "closed" => t.error,
-        _ => t.border,
-    };
-
-    let time_ago = format_time_ago(&mr.updated_at);
-
-    let lines = vec![
-        // Title
-        Line::from(vec![
-            Span::styled(format!("!{}", mr.iid), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-            Span::styled("  ", Style::default()),
-            Span::styled(mr.title.clone(), Style::default().fg(t.text).add_modifier(Modifier::BOLD)),
-        ]),
-        // Metadata line
-        Line::from(vec![
-            Span::styled(format!("@{}", mr.author.username), Style::default().fg(t.warning)),
-            Span::styled(" │ ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.state.clone(), Style::default().fg(status_color)),
-            Span::styled(" │ ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.source_branch.clone(), Style::default().fg(t.info)),
-            Span::styled(" → ", Style::default().fg(t.text_dim)),
-            Span::styled(mr.target_branch.clone(), Style::default().fg(t.info)),
-            Span::styled(" │ ", Style::default().fg(t.text_dim)),
-            Span::styled(time_ago, Style::default().fg(t.text_dim)),
-        ]),
-        // URL
-        Line::from(Span::styled(mr.web_url.clone(), Style::default().fg(t.text_dim))),
-        // Blank line
-        Line::from(""),
-    ];
-
-    let header_height = lines.len() as u16;
-    let chunks = Layout::vertical([
-        Constraint::Length(header_height),
-        Constraint::Min(0),
-    ])
-    .split(area);
-
-    frame.render_widget(Paragraph::new(lines), chunks[0]);
-
     // Description
     if app.mr_detail_loading {
         frame.render_widget(
             Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
-            chunks[1],
+            area,
         );
     } else {
         let desc_text = app
@@ -544,7 +543,7 @@ fn render_mr_overview(
             .unwrap_or("No description");
 
         let md = tui_markdown::from_str(desc_text);
-        let desc_area = chunks[1];
+        let desc_area = area;
         let visible_height = desc_area.height as u16;
         let content_height = md.lines.len() as u16;
 
