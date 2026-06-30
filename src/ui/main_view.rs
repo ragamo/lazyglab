@@ -1213,14 +1213,44 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_job_log(frame: &mut Frame, app: &mut App, area: Rect) {
+    use ansi_to_tui::IntoText;
     let t = app.theme;
 
+    // Left border
     let block = Block::default()
         .borders(Borders::LEFT)
-        .border_style(Style::default().fg(t.border))
-        .title(Span::styled(" log ", Style::default().fg(t.text_dim)));
+        .border_style(Style::default().fg(t.border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    // Split inner: header row + content
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ]).split(inner);
+
+    // Header row with full background
+    let header_area = chunks[0];
+    let title = " job log";
+    let close = "[X]";
+    let padding = (header_area.width as usize)
+        .saturating_sub(title.len() + close.len());
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(title, Style::default().fg(t.text).bg(t.header_bg).add_modifier(Modifier::BOLD)),
+            Span::styled(" ".repeat(padding), Style::default().bg(t.header_bg)),
+            Span::styled(close, Style::default().fg(t.text_dim).bg(t.header_bg)),
+        ])),
+        header_area,
+    );
+
+    // Register close area (both regions — one will be active depending on context)
+    let close_x = header_area.x + header_area.width.saturating_sub(3);
+    let job_log_close = Rect { x: close_x, y: header_area.y, width: 3, height: 1 };
+    app.click_regions.pipeline_detail.job_log_close = Some(job_log_close);
+    app.click_regions.mr_detail.job_log_close = Some(job_log_close);
+
+    let inner = chunks[1];
 
     if app.job_log_loading {
         frame.render_widget(
@@ -1230,21 +1260,43 @@ fn render_job_log(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Strip ANSI escape codes for clean display
-    let clean: String = strip_ansi(&app.job_log);
-    let lines: Vec<Line> = clean.lines()
-        .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(t.text))))
-        .collect();
+    // Parse ANSI codes into styled ratatui Text
+    let parsed = app.job_log.as_str().into_text().unwrap_or_default();
+    let total_lines = parsed.lines.len();
 
-    let content_height = lines.len() as u16;
-    let visible_height = inner.height;
+    // Calculate line number gutter width
+    let gutter_width = (total_lines.max(1).to_string().len() as u16) + 1;
+
+    // Split inner: gutter | content
+    let cols = Layout::horizontal([
+        Constraint::Length(gutter_width),
+        Constraint::Min(0),
+    ]).split(inner);
+
+    let content_height = total_lines as u16;
+    let visible_height = cols[1].height;
     let max_scroll = content_height.saturating_sub(visible_height);
     if app.job_log_scroll > max_scroll {
         app.job_log_scroll = max_scroll;
     }
 
-    let para = Paragraph::new(lines).scroll((app.job_log_scroll, 0));
-    frame.render_widget(para, inner);
+    // Render gutter with line numbers
+    let gutter_lines: Vec<Line> = (1..=total_lines)
+        .map(|n| Line::from(Span::styled(
+            format!("{:>width$}", n, width = (gutter_width - 1) as usize),
+            Style::default().fg(t.border),
+        )))
+        .collect();
+    frame.render_widget(
+        Paragraph::new(gutter_lines).scroll((app.job_log_scroll, 0)),
+        cols[0],
+    );
+
+    // Render log content with ANSI colors
+    frame.render_widget(
+        Paragraph::new(parsed).scroll((app.job_log_scroll, 0)),
+        cols[1],
+    );
 
     if content_height > visible_height {
         let mut state = ScrollbarState::new(max_scroll as usize).position(app.job_log_scroll as usize);
@@ -1255,24 +1307,6 @@ fn render_job_log(frame: &mut Frame, app: &mut App, area: Rect) {
         let sb_area = Rect { x: area.x + area.width.saturating_sub(1), y: inner.y, width: 1, height: inner.height };
         frame.render_stateful_widget(scrollbar, sb_area, &mut state);
     }
-}
-
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_escape = false;
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            in_escape = true;
-        } else if in_escape {
-            if c == 'm' || c == 'K' || c == 'J' || c == 'H' || c == 'A' || c == 'B' || c == 'C' || c == 'D' {
-                in_escape = false;
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {

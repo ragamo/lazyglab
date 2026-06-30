@@ -18,3 +18,4 @@ dirs = "6"
 futures = "0.3"
 thiserror = "2"
 tui-markdown = { version = "0.3", default-features = false }
+ansi-to-tui = "8"

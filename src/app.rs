@@ -832,6 +832,15 @@ impl App {
             }
         }
 
+        // Job log close button
+        if let Some(area) = self.click_regions.mr_detail.job_log_close {
+            if hit(pos, area) {
+                self.job_log_open = false;
+                self.selected_job_id = None;
+                return;
+            }
+        }
+
         // Job click areas (MR Pipelines tab)
         if self.mr_detail_tab == MrDetailTab::Pipelines {
             let job_areas: Vec<(Rect, u64)> = self.click_regions.mr_detail.job_areas.clone();
@@ -939,6 +948,15 @@ impl App {
         }
 
         if self.active_tab == Tab::Pipelines {
+            // Job log close button
+            if let Some(area) = self.click_regions.pipeline_detail.job_log_close {
+                if hit(pos, area) {
+                    self.job_log_open = false;
+                    self.selected_job_id = None;
+                    return;
+                }
+            }
+
             // Pipeline detail close button
             if let Some(area) = self.click_regions.pipeline_detail.close {
                 if hit(pos, area) {

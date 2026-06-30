@@ -45,6 +45,7 @@ pub struct MrDetailRegion {
     pub resize: Option<Rect>,
     pub tab_areas: Vec<Rect>,
     pub job_areas: Vec<(Rect, u64)>,
+    pub job_log_close: Option<Rect>,
 }
 
 #[derive(Default)]
@@ -52,6 +53,7 @@ pub struct PipelineDetailRegion {
     pub bounds: Option<Rect>,
     pub close: Option<Rect>,
     pub job_areas: Vec<(Rect, u64)>,  // (area, job_id)
+    pub job_log_close: Option<Rect>,
 }
 
 #[derive(Default)]
