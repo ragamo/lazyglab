@@ -525,6 +525,7 @@ impl App {
                         .position(|p| p.id == project.id)
                         .unwrap_or(0);
                     self.find_modal_open = false;
+                    self.reset_panels();
                     self.load_merge_requests();
                     self.load_pipelines();
                 }
@@ -778,6 +779,7 @@ impl App {
             if hit(pos, *area) {
                 self.selected_project = i;
                 self.project_selector_open = false;
+                self.reset_panels();
                 self.load_merge_requests();
                 self.load_pipelines();
                 return;
@@ -810,7 +812,9 @@ impl App {
                         .position(|p| p.id == project.id)
                         .unwrap_or(0);
                     self.find_modal_open = false;
+                    self.reset_panels();
                     self.load_merge_requests();
+                    self.load_pipelines();
                 }
                 return;
             }
@@ -1356,6 +1360,27 @@ impl App {
             let result = provider.list_pipelines(Default::default()).await;
             let _ = tx.send(AppMessage::PipelinesLoaded(result));
         });
+    }
+
+    pub fn reset_panels(&mut self) {
+        self.mr_detail_open = false;
+        self.mr_detail_full = None;
+        self.mr_detail_tab = MrDetailTab::default();
+        self.mr_commits.clear();
+        self.mr_pipelines.clear();
+        self.mr_pipeline_enriched.clear();
+        self.mr_nav.reset();
+        self.pipeline_detail_open = false;
+        self.pipeline_detail_enriched = None;
+        self.pipeline_detail_loading = false;
+        self.pipeline_detail_scroll = 0;
+        self.job_log_open = false;
+        self.job_log.clear();
+        self.job_log_loading = false;
+        self.job_log_scroll = 0;
+        self.selected_job_id = None;
+        self.selected_job_name = None;
+        self.pipeline_nav.reset();
     }
 
     pub fn logout(&mut self) {
