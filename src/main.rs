@@ -21,8 +21,36 @@ use ratatui::prelude::*;
 
 use app::App;
 
+const HELP: &str = "\
+lazyglab — a TUI for GitLab and GitHub
+
+USAGE:
+    lazyglab [OPTIONS]
+
+OPTIONS:
+    -V, --version    Print version and exit
+    -h, --help       Print this help and exit
+
+Authenticate with a personal access token via the LAZYGLAB_TOKEN or
+GITLAB_TOKEN environment variable, or the config file.";
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle CLI flags before taking over the terminal.
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "-V" | "--version" => {
+                println!("lazyglab {}", env!("CARGO_PKG_VERSION"));
+                return Ok(());
+            }
+            "-h" | "--help" => {
+                println!("{HELP}");
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     color_eyre::install()?;
 
     enable_raw_mode()?;

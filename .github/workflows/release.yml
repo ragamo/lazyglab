@@ -64,3 +64,45 @@ jobs:
           # Cross-compilation (e.g. aarch64 linux) is handled via `cross`.
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Regenerate the Homebrew formula in ragamo/homebrew-tap from the new release.
+  # Requires a TAP_GITHUB_TOKEN secret (a PAT with contents:write on the tap).
+  # Skips gracefully if the secret is not configured, so releases stay green.
+  bump-tap:
+    name: Update Homebrew tap
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tap token
+        id: check
+        env:
+          TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "TAP_GITHUB_TOKEN not set — skipping tap bump"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout lazyglab (for the generator script)
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v5
+
+      - name: Checkout tap
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: ragamo/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Regenerate and commit formula
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          mkdir -p tap/Formula
+          sh scripts/gen-formula.sh "${GITHUB_REF_NAME}" > tap/Formula/lazyglab.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/lazyglab.rb
+          git diff --staged --quiet || git commit -m "lazyglab ${GITHUB_REF_NAME#v}"
+          git push

@@ -1,8 +1,10 @@
 [package]
 name = "lazyglab"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A TUI wrapper for GitLab and GitHub — PRs, pipelines, and more"
+license = "MIT"
+repository = "https://github.com/ragamo/lazyglab"
 
 [dependencies]
 ratatui = "0.30"
