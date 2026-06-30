@@ -510,13 +510,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, &mr, content_area),
         crate::app::MrDetailTab::Commits => render_mr_commits(frame, app, content_area),
         crate::app::MrDetailTab::Pipelines => render_mr_pipelines(frame, app, content_area),
-        _ => {
-            let placeholder = Paragraph::new(Span::styled(
-                "coming soon",
-                Style::default().fg(t.text_dim),
-            ));
-            frame.render_widget(placeholder, content_area);
-        }
+        crate::app::MrDetailTab::Changes => render_mr_changes(frame, app, content_area),
     }
 }
 
@@ -635,6 +629,221 @@ fn render_mr_commits(frame: &mut Frame, app: &mut App, area: Rect) {
     if content_height > visible_height {
         let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
             .position(app.mr_commits_scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
+}
+
+// Mix color `a` toward `b` by ratio `t` (0.0 = all a, 1.0 = all b). Used to derive
+// a faint diff background from the theme's success/error color and its bg.
+fn blend(a: Color, b: Color, t: f32) -> Color {
+    match (a, b) {
+        (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => {
+            let mix = |x: u8, y: u8| (x as f32 * (1.0 - t) + y as f32 * t).round() as u8;
+            Color::Rgb(mix(ar, br), mix(ag, bg), mix(ab, bb))
+        }
+        _ => a,
+    }
+}
+
+// Parse a unified-diff hunk header like "@@ -12,7 +14,8 @@ ..." into (old_start, new_start)
+fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
+    let rest = line.strip_prefix("@@ -")?;
+    let mut parts = rest.split(" +");
+    let old_part = parts.next()?;
+    let new_part = parts.next()?;
+    let old_start = old_part.split(',').next()?.trim().parse().ok()?;
+    let new_start = new_part
+        .split(|c| c == ',' || c == ' ')
+        .next()?
+        .trim()
+        .parse()
+        .ok()?;
+    Some((old_start, new_start))
+}
+
+fn render_mr_changes(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    if app.mr_changes_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    if app.mr_changes.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("No changes", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    // (line index, header line) for each file — used to pin the active header on top
+    let mut headers: Vec<(u16, Line)> = Vec::new();
+    for change in &app.mr_changes {
+        // Count added/removed lines (ignore the +++/--- file headers)
+        let mut added = 0u32;
+        let mut removed = 0u32;
+        for l in change.diff.lines() {
+            if l.starts_with("+++") || l.starts_with("---") {
+                continue;
+            }
+            if l.starts_with('+') {
+                added += 1;
+            } else if l.starts_with('-') {
+                removed += 1;
+            }
+        }
+
+        let tag = if change.new_file {
+            Some(("[new] ", t.success))
+        } else if change.deleted_file {
+            Some(("[deleted] ", t.error))
+        } else if change.renamed_file {
+            Some(("[renamed] ", t.info))
+        } else {
+            None
+        };
+
+        // File header: path + +N -N counters
+        let mut header: Vec<Span> = Vec::new();
+        if let Some((label, color)) = tag {
+            header.push(Span::styled(label, Style::default().fg(color)));
+        }
+        header.push(Span::styled(
+            change.new_path.clone(),
+            Style::default().fg(t.text).add_modifier(Modifier::BOLD),
+        ));
+        header.push(Span::raw("  "));
+        header.push(Span::styled(format!("+{}", added), Style::default().fg(t.success)));
+        header.push(Span::raw(" "));
+        header.push(Span::styled(format!("-{}", removed), Style::default().fg(t.error)));
+        let header_line = Line::from(header);
+        headers.push((lines.len() as u16, header_line.clone()));
+        lines.push(header_line);
+
+        // Diff body, colored by line prefix, with an old/new line-number gutter
+        let gutter_style = Style::default().fg(t.text_dim);
+        let blank_gutter = "          "; // 4 + 1 + 4 + 1 spaces, matches "{:>4} {:>4} "
+        let add_bg = blend(t.bg, t.success, 0.18);
+        let del_bg = blend(t.bg, t.error, 0.18);
+        // Pad +/- rows so the tinted background spans the full panel width
+        let row_width = area.width.saturating_sub(1) as usize;
+        let content_target = row_width.saturating_sub(blank_gutter.len());
+        let mut old_no = 0u32;
+        let mut new_no = 0u32;
+        for l in change.diff.lines() {
+            if l.starts_with("+++") || l.starts_with("---") {
+                lines.push(Line::from(vec![
+                    Span::raw(blank_gutter),
+                    Span::styled(l.to_string(), Style::default().fg(t.text_dim)),
+                ]));
+                continue;
+            }
+            if l.starts_with("@@") {
+                if let Some((o, n)) = parse_hunk_header(l) {
+                    old_no = o;
+                    new_no = n;
+                }
+                lines.push(Line::from(vec![
+                    Span::raw(blank_gutter),
+                    Span::styled(l.to_string(), Style::default().fg(t.info)),
+                ]));
+                continue;
+            }
+
+            let (fg, row_bg, old_label, new_label) = if l.starts_with('+') {
+                let label = (String::new(), new_no.to_string());
+                new_no += 1;
+                (t.success, Some(add_bg), label.0, label.1)
+            } else if l.starts_with('-') {
+                let label = (old_no.to_string(), String::new());
+                old_no += 1;
+                (t.error, Some(del_bg), label.0, label.1)
+            } else {
+                let label = (old_no.to_string(), new_no.to_string());
+                old_no += 1;
+                new_no += 1;
+                (t.text, None, label.0, label.1)
+            };
+
+            // Pad tinted rows so the background fills the full width
+            let mut content = l.to_string();
+            if row_bg.is_some() {
+                let vis = content.chars().count();
+                if vis < content_target {
+                    content.push_str(&" ".repeat(content_target - vis));
+                }
+            }
+
+            let mut gutter_st = gutter_style;
+            let mut content_st = Style::default().fg(fg);
+            if let Some(bg) = row_bg {
+                gutter_st = gutter_st.bg(bg);
+                content_st = content_st.bg(bg);
+            }
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("{:>4} {:>4} ", old_label, new_label), gutter_st),
+                Span::styled(content, content_st),
+            ]));
+        }
+
+        lines.push(Line::from(Span::styled(
+            "─".repeat(area.width.saturating_sub(1) as usize),
+            Style::default().fg(t.border),
+        )));
+    }
+
+    let visible_height = area.height;
+    let content_height = lines.len() as u16;
+    let max_scroll = content_height.saturating_sub(visible_height);
+    if app.mr_changes_scroll > max_scroll {
+        app.mr_changes_scroll = max_scroll;
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .scroll((app.mr_changes_scroll, 0));
+    frame.render_widget(paragraph, area);
+
+    // Sticky header: pin the header of the file owning the topmost visible line.
+    // Only pin once scrolled past the file's own header (otherwise it already shows in flow).
+    if let Some((idx, header_line)) = headers
+        .iter()
+        .rev()
+        .find(|(idx, _)| *idx <= app.mr_changes_scroll)
+    {
+        if *idx < app.mr_changes_scroll {
+            let header_area = Rect {
+                x: area.x,
+                y: area.y,
+                width: area.width.saturating_sub(1),
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(header_line.clone()).style(Style::default().bg(t.header_bg)),
+                header_area,
+            );
+        }
+    }
+
+    if content_height > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+            .position(app.mr_changes_scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None)

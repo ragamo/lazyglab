@@ -8,7 +8,7 @@ use crate::auth::{self, TokenSource};
 use crate::config;
 use crate::config::types::AppConfig;
 use std::collections::HashMap;
-use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrPipeline, MrState, PipelineEnrichedData, Pipeline, ProjectInfo, StageStatus, User};
+use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrChange, MrPipeline, MrState, PipelineEnrichedData, Pipeline, ProjectInfo, StageStatus, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::table_nav::TableNav;
@@ -117,6 +117,7 @@ pub enum AppMessage {
     SearchResults(Result<Vec<ProjectInfo>, ProviderError>),
     MrDetailLoaded(Result<MergeRequest, ProviderError>),
     MrCommitsLoaded(Result<Vec<Commit>, ProviderError>),
+    MrChangesLoaded(Result<Vec<MrChange>, ProviderError>),
     MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
     PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
     PipelineEnrichedRefreshed(u64, Result<PipelineEnrichedData, ProviderError>),
@@ -184,6 +185,9 @@ pub struct App {
     pub mr_commits: Vec<Commit>,
     pub mr_commits_loading: bool,
     pub mr_commits_scroll: u16,
+    pub mr_changes: Vec<MrChange>,
+    pub mr_changes_loading: bool,
+    pub mr_changes_scroll: u16,
     pub mr_pipelines: Vec<MrPipeline>,
     pub mr_pipelines_loading: bool,
     pub mr_pipelines_scroll: u16,
@@ -283,6 +287,9 @@ impl App {
             mr_commits: Vec::new(),
             mr_commits_loading: false,
             mr_commits_scroll: 0,
+            mr_changes: Vec::new(),
+            mr_changes_loading: false,
+            mr_changes_scroll: 0,
             mr_pipelines: Vec::new(),
             mr_pipelines_loading: false,
             mr_pipelines_scroll: 0,
@@ -685,6 +692,7 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_add(3),
+                                MrDetailTab::Changes => self.mr_changes_scroll = self.mr_changes_scroll.saturating_add(3),
                                 MrDetailTab::Pipelines => {
                                     let mid = bounds.x + bounds.width * 2 / 5;
                                     if self.job_log_open && pos.0 > mid {
@@ -727,6 +735,7 @@ impl App {
                             match self.mr_detail_tab {
                                 MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3),
                                 MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_sub(3),
+                                MrDetailTab::Changes => self.mr_changes_scroll = self.mr_changes_scroll.saturating_sub(3),
                                 MrDetailTab::Pipelines => {
                                     let mid = bounds.x + bounds.width * 2 / 5;
                                     if self.job_log_open && pos.0 > mid {
@@ -1100,6 +1109,13 @@ impl App {
             AppMessage::MrCommitsLoaded(Err(_)) => {
                 self.mr_commits_loading = false;
             }
+            AppMessage::MrChangesLoaded(Ok(changes)) => {
+                self.mr_changes = changes;
+                self.mr_changes_loading = false;
+            }
+            AppMessage::MrChangesLoaded(Err(_)) => {
+                self.mr_changes_loading = false;
+            }
             AppMessage::MrPipelinesLoaded(Ok(pipelines)) => {
                 self.mr_pipelines = pipelines;
                 self.mr_pipelines_loading = false;
@@ -1367,6 +1383,7 @@ impl App {
         self.mr_detail_full = None;
         self.mr_detail_tab = MrDetailTab::default();
         self.mr_commits.clear();
+        self.mr_changes.clear();
         self.mr_pipelines.clear();
         self.mr_pipeline_enriched.clear();
         self.mr_nav.reset();
@@ -1443,6 +1460,9 @@ impl App {
         self.mr_commits_loading = true;
         self.mr_commits.clear();
         self.mr_commits_scroll = 0;
+        self.mr_changes_loading = true;
+        self.mr_changes.clear();
+        self.mr_changes_scroll = 0;
         self.mr_pipelines_loading = true;
         self.mr_pipelines.clear();
         self.mr_pipelines_scroll = 0;
@@ -1451,18 +1471,23 @@ impl App {
         let tx = self.message_tx.clone();
         let tx2 = self.message_tx.clone();
         let tx3 = self.message_tx.clone();
+        let tx4 = self.message_tx.clone();
         let client = self.http_client.clone();
         let client2 = self.http_client.clone();
         let client3 = self.http_client.clone();
+        let client4 = self.http_client.clone();
         let token = self.token_input.clone();
         let token2 = self.token_input.clone();
         let token3 = self.token_input.clone();
+        let token4 = self.token_input.clone();
         let base_url = self.config.gitlab.base_url_or_default().to_string();
         let base_url2 = base_url.clone();
         let base_url3 = base_url.clone();
+        let base_url4 = base_url.clone();
         let project_path = project.path_with_namespace.clone();
         let project_path2 = project_path.clone();
         let project_path3 = project_path.clone();
+        let project_path4 = project_path.clone();
 
         tokio::spawn(async move {
             let provider = GitLabProvider::new(client, token, base_url, project_path);
@@ -1480,6 +1505,12 @@ impl App {
             let provider = GitLabProvider::new(client3, token3, base_url3, project_path3);
             let result = provider.list_mr_pipelines(mr_iid).await;
             let _ = tx3.send(AppMessage::MrPipelinesLoaded(result));
+        });
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client4, token4, base_url4, project_path4);
+            let result = provider.list_mr_changes(mr_iid).await;
+            let _ = tx4.send(AppMessage::MrChangesLoaded(result));
         });
     }
 

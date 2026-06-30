@@ -31,6 +31,7 @@ pub trait Provider: Send + Sync {
     async fn list_user_projects(&self, page: u32) -> ProviderResult<Vec<ProjectInfo>>;
     async fn search_projects(&self, query: &str) -> ProviderResult<Vec<ProjectInfo>>;
     async fn list_mr_commits(&self, mr_iid: u64) -> ProviderResult<Vec<Commit>>;
+    async fn list_mr_changes(&self, mr_iid: u64) -> ProviderResult<Vec<MrChange>>;
     async fn list_mr_pipelines(&self, mr_iid: u64) -> ProviderResult<Vec<MrPipeline>>;
     async fn get_pipeline_enriched(&self, pipeline_id: u64) -> ProviderResult<PipelineEnrichedData>;
     async fn get_job_log(&self, job_id: u64) -> ProviderResult<String>;

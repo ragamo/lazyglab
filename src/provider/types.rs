@@ -109,6 +109,19 @@ pub struct Commit {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct MrChange {
+    pub old_path: String,
+    pub new_path: String,
+    #[serde(default)]
+    pub new_file: bool,
+    #[serde(default)]
+    pub renamed_file: bool,
+    #[serde(default)]
+    pub deleted_file: bool,
+    pub diff: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct MrPipeline {
     pub id: u64,
     pub status: String,

@@ -248,6 +248,29 @@ impl Provider for GitLabProvider {
         Ok(commits)
     }
 
+    async fn list_mr_changes(&self, mr_iid: u64) -> ProviderResult<Vec<MrChange>> {
+        let url = self.api_url(&format!(
+            "/projects/{}/merge_requests/{}/diffs",
+            self.encoded_project_id(),
+            mr_iid
+        ));
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[("per_page", "100")])
+            .send()
+            .await?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(ProviderError::NotFound("MR changes not found".into()));
+        }
+
+        let changes: Vec<MrChange> = resp.error_for_status()?.json().await?;
+        Ok(changes)
+    }
+
     async fn list_mr_pipelines(&self, mr_iid: u64) -> ProviderResult<Vec<MrPipeline>> {
         let url = self.api_url(&format!(
             "/projects/{}/merge_requests/{}/pipelines",
