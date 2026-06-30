@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::auth::{self, TokenSource};
 use crate::config;
 use crate::config::types::AppConfig;
-use crate::provider::types::{ListMrParams, MergeRequest, MrState, Pipeline, ProjectInfo, User};
+use crate::provider::types::{Commit, ListMrParams, MergeRequest, MrState, Pipeline, ProjectInfo, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
 use crate::table_nav::TableNav;
@@ -114,6 +114,7 @@ pub enum AppMessage {
     ProjectsLoaded(Result<Vec<ProjectInfo>, ProviderError>),
     SearchResults(Result<Vec<ProjectInfo>, ProviderError>),
     MrDetailLoaded(Result<MergeRequest, ProviderError>),
+    MrCommitsLoaded(Result<Vec<Commit>, ProviderError>),
     Tick,
 }
 
@@ -174,6 +175,9 @@ pub struct App {
     pub mr_detail_loading: bool,
     pub mr_detail_full: Option<MergeRequest>,
     pub mr_desc_scroll: u16,
+    pub mr_commits: Vec<Commit>,
+    pub mr_commits_loading: bool,
+    pub mr_commits_scroll: u16,
 
     // Pipeline detail state
     pub pipeline_detail_open: bool,
@@ -252,6 +256,9 @@ impl App {
             mr_detail_loading: false,
             mr_detail_full: None,
             mr_desc_scroll: 0,
+            mr_commits: Vec::new(),
+            mr_commits_loading: false,
+            mr_commits_scroll: 0,
             pipeline_detail_open: false,
             pipeline_detail_height: 0,
             click_regions: ClickRegions::default(),
@@ -611,7 +618,11 @@ impl App {
                 if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
                     if let Some(bounds) = self.click_regions.mr_detail.bounds {
                         if hit(pos, bounds) {
-                            self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3);
+                            match self.mr_detail_tab {
+                                MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_add(3),
+                                MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_add(3),
+                                _ => {}
+                            }
                             return;
                         }
                     }
@@ -629,7 +640,11 @@ impl App {
                 if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
                     if let Some(bounds) = self.click_regions.mr_detail.bounds {
                         if hit(pos, bounds) {
-                            self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3);
+                            match self.mr_detail_tab {
+                                MrDetailTab::Overview => self.mr_desc_scroll = self.mr_desc_scroll.saturating_sub(3),
+                                MrDetailTab::Commits => self.mr_commits_scroll = self.mr_commits_scroll.saturating_sub(3),
+                                _ => {}
+                            }
                             return;
                         }
                     }
@@ -921,6 +936,13 @@ impl App {
             AppMessage::MrDetailLoaded(Err(_)) => {
                 self.mr_detail_loading = false;
             }
+            AppMessage::MrCommitsLoaded(Ok(commits)) => {
+                self.mr_commits = commits;
+                self.mr_commits_loading = false;
+            }
+            AppMessage::MrCommitsLoaded(Err(_)) => {
+                self.mr_commits_loading = false;
+            }
             AppMessage::Tick => {
                 if self.screen == AppScreen::Main
                     && self.active_tab == Tab::Pipelines
@@ -1027,16 +1049,31 @@ impl App {
         self.mr_detail_loading = true;
         self.mr_detail_full = None;
         self.mr_desc_scroll = 0;
+        self.mr_commits_loading = true;
+        self.mr_commits.clear();
+        self.mr_commits_scroll = 0;
 
         let tx = self.message_tx.clone();
+        let tx2 = self.message_tx.clone();
         let client = self.http_client.clone();
+        let client2 = self.http_client.clone();
         let token = self.token_input.clone();
+        let token2 = self.token_input.clone();
         let base_url = self.config.gitlab.base_url_or_default().to_string();
+        let base_url2 = base_url.clone();
+        let project_path = project.path_with_namespace.clone();
+        let project_path2 = project.path_with_namespace.clone();
 
         tokio::spawn(async move {
-            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let provider = GitLabProvider::new(client, token, base_url, project_path);
             let result = provider.get_merge_request(mr_iid).await;
             let _ = tx.send(AppMessage::MrDetailLoaded(result));
+        });
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client2, token2, base_url2, project_path2);
+            let result = provider.list_mr_commits(mr_iid).await;
+            let _ = tx2.send(AppMessage::MrCommitsLoaded(result));
         });
     }
 

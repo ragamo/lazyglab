@@ -465,6 +465,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let content_area = inner_chunks[2]; // [1] is blank line
     match app.mr_detail_tab {
         crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, &mr, content_area),
+        crate::app::MrDetailTab::Commits => render_mr_commits(frame, app, content_area),
         _ => {
             let placeholder = Paragraph::new(Span::styled(
                 "coming soon",
@@ -575,6 +576,76 @@ fn render_mr_overview(
             };
             frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
         }
+    }
+}
+
+fn render_mr_commits(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = app.theme;
+
+    if app.mr_commits_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    if app.mr_commits.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("No commits", Style::default().fg(t.text_dim))),
+            area,
+        );
+        return;
+    }
+
+    let card_height: u16 = 3; // title + author line + separator
+    let visible_height = area.height;
+    let content_height = app.mr_commits.len() as u16 * card_height;
+    let max_scroll = content_height.saturating_sub(visible_height);
+    if app.mr_commits_scroll > max_scroll {
+        app.mr_commits_scroll = max_scroll;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    for commit in &app.mr_commits {
+        lines.push(Line::from(vec![
+            Span::styled(&commit.short_id, Style::default().fg(t.info)),
+            Span::styled("  ", Style::default()),
+            Span::styled(&commit.title, Style::default().fg(t.text)),
+        ]));
+        let time_ago = format_time_ago(&commit.created_at);
+        lines.push(Line::from(vec![
+            Span::raw("          "),
+            Span::styled(
+                format!("{} authored {}", commit.author_name, time_ago),
+                Style::default().fg(t.text_dim),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            "─".repeat(area.width.saturating_sub(1) as usize),
+            Style::default().fg(t.border),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .scroll((app.mr_commits_scroll, 0));
+    frame.render_widget(paragraph, area);
+
+    if content_height > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+            .position(app.mr_commits_scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
     }
 }
 

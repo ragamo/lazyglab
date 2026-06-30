@@ -85,6 +85,14 @@ impl Default for ListPipelineParams {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct Commit {
+    pub short_id: String,
+    pub title: String,
+    pub author_name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct ProjectInfo {
     pub id: u64,
     pub name: String,

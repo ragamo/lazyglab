@@ -30,4 +30,5 @@ pub trait Provider: Send + Sync {
     async fn list_pipelines(&self, params: ListPipelineParams) -> ProviderResult<Vec<Pipeline>>;
     async fn list_user_projects(&self, page: u32) -> ProviderResult<Vec<ProjectInfo>>;
     async fn search_projects(&self, query: &str) -> ProviderResult<Vec<ProjectInfo>>;
+    async fn list_mr_commits(&self, mr_iid: u64) -> ProviderResult<Vec<Commit>>;
 }

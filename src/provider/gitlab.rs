@@ -213,4 +213,26 @@ impl Provider for GitLabProvider {
         let projects: Vec<ProjectInfo> = resp.error_for_status()?.json().await?;
         Ok(projects)
     }
+
+    async fn list_mr_commits(&self, mr_iid: u64) -> ProviderResult<Vec<Commit>> {
+        let url = self.api_url(&format!(
+            "/projects/{}/merge_requests/{}/commits",
+            self.encoded_project_id(),
+            mr_iid
+        ));
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .await?;
+
+        if resp.status().as_u16() == 404 {
+            return Err(ProviderError::NotFound("MR commits not found".into()));
+        }
+
+        let commits: Vec<Commit> = resp.error_for_status()?.json().await?;
+        Ok(commits)
+    }
 }
