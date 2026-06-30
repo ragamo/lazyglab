@@ -119,6 +119,7 @@ pub enum AppMessage {
     MrCommitsLoaded(Result<Vec<Commit>, ProviderError>),
     MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
     PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
+    PipelineEnrichedRefreshed(u64, Result<PipelineEnrichedData, ProviderError>),
     PipelineDetailEnrichedLoaded(Result<PipelineEnrichedData, ProviderError>),
     PipelineDetailRefreshed(Result<PipelineEnrichedData, ProviderError>),
     JobLogLoaded(Result<String, ProviderError>),
@@ -1120,6 +1121,14 @@ impl App {
                 self.mr_pipeline_enriched.insert(pipeline_id, data);
             }
             AppMessage::PipelineEnrichedLoaded(_, Err(_)) => {}
+            AppMessage::PipelineEnrichedRefreshed(pipeline_id, Ok(data)) => {
+                // Update status on the mr_pipelines list entry too
+                if let Some(p) = self.mr_pipelines.iter_mut().find(|p| p.id == pipeline_id) {
+                    p.status = data.status.clone();
+                }
+                self.mr_pipeline_enriched.insert(pipeline_id, data);
+            }
+            AppMessage::PipelineEnrichedRefreshed(_, Err(_)) => {}
             AppMessage::PipelineDetailEnrichedLoaded(Ok(data)) => {
                 if let Some(idx) = self.pipeline_nav.selected {
                     if let Some(p) = self.pipelines.get_mut(idx) {
@@ -1161,6 +1170,9 @@ impl App {
             AppMessage::Tick => {
                 if self.pipeline_detail_open && self.has_running_jobs() {
                     self.refresh_pipeline_detail();
+                }
+                if !self.mr_pipeline_enriched.is_empty() && self.has_running_jobs() {
+                    self.refresh_mr_pipelines();
                 }
                 if self.job_log_open && !self.job_log_loading {
                     self.refresh_job_log();
@@ -1276,6 +1288,32 @@ impl App {
             let result = provider.get_job_log(job_id).await;
             let _ = tx.send(AppMessage::JobLogLoaded(result));
         });
+    }
+
+    pub fn refresh_mr_pipelines(&mut self) {
+        let project_path = match self.projects.get(self.selected_project) {
+            Some(p) => p.path_with_namespace.clone(),
+            None => return,
+        };
+        let running_ids: Vec<u64> = self.mr_pipeline_enriched
+            .iter()
+            .filter(|(_, data)| data.stages.iter().any(|s| {
+                s.jobs.iter().any(|j| j.status == "running" || j.sub_jobs.iter().any(|sj| sj.status == "running"))
+            }))
+            .map(|(id, _)| *id)
+            .collect();
+        for pipeline_id in running_ids {
+            let tx = self.message_tx.clone();
+            let client = self.http_client.clone();
+            let token = self.token_input.clone();
+            let base_url = self.config.gitlab.base_url_or_default().to_string();
+            let path = project_path.clone();
+            tokio::spawn(async move {
+                let provider = GitLabProvider::new(client, token, base_url, path);
+                let result = provider.get_pipeline_enriched(pipeline_id).await;
+                let _ = tx.send(AppMessage::PipelineEnrichedRefreshed(pipeline_id, result));
+            });
+        }
     }
 
     pub fn refresh_interval_secs(&self) -> u64 {
