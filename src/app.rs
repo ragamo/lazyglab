@@ -9,6 +9,7 @@ use crate::config::types::AppConfig;
 use crate::provider::types::{ListMrParams, MergeRequest, MrState, Pipeline, ProjectInfo, User};
 use crate::provider::gitlab::GitLabProvider;
 use crate::provider::{Provider, ProviderError};
+use crate::table_nav::TableNav;
 use crate::theme::{self, Theme};
 use crate::ui::click_regions::ClickRegions;
 
@@ -161,11 +162,11 @@ pub struct App {
     pub theme_confirmed: usize,
     pub theme: &'static Theme,
 
-    // MR list scroll
-    pub mr_list_offset: usize,
+    // Table navigation (separate state per tab)
+    pub mr_nav: TableNav,
+    pub pipeline_nav: TableNav,
 
     // MR detail state
-    pub selected_mr_index: Option<usize>,
     pub mr_detail_height: u16,
     pub mr_detail_dragging: bool,
     pub mr_detail_tab: MrDetailTab,
@@ -236,8 +237,8 @@ impl App {
             theme_selected,
             theme_confirmed: theme_selected,
             theme: active_theme,
-            mr_list_offset: 0,
-            selected_mr_index: None,
+            mr_nav: TableNav::default(),
+            pipeline_nav: TableNav::default(),
             mr_detail_height: 0,
             mr_detail_dragging: false,
             mr_detail_tab: MrDetailTab::default(),
@@ -254,24 +255,14 @@ impl App {
         if self.project_selector_open { return FocusLayer::ProjectDropdown; }
         if self.find_modal_open { return FocusLayer::FindModal; }
         if self.settings_open { return FocusLayer::SettingsModal; }
-        if self.selected_mr_index.is_some() { return FocusLayer::MrDetail; }
+        if self.mr_nav.selected.is_some() { return FocusLayer::MrDetail; }
         FocusLayer::Main
     }
 
-    fn mr_list_scroll_down(&mut self) {
-        let filtered_count = self.merge_requests.iter()
+    fn filtered_mr_count(&self) -> usize {
+        self.merge_requests.iter()
             .filter(|mr| self.mr_filter.matches(&mr.state))
-            .count();
-        if self.mr_list_offset + 1 < filtered_count {
-            self.mr_list_offset += 3;
-            if self.mr_list_offset >= filtered_count {
-                self.mr_list_offset = filtered_count.saturating_sub(1);
-            }
-        }
-    }
-
-    fn mr_list_scroll_up(&mut self) {
-        self.mr_list_offset = self.mr_list_offset.saturating_sub(3);
+            .count()
     }
 
     fn try_auto_auth(&mut self) {
@@ -377,8 +368,8 @@ impl App {
                     }
                 } else {
                     match key.code {
-                        KeyCode::Esc if self.selected_mr_index.is_some() => {
-                            self.selected_mr_index = None;
+                        KeyCode::Esc if self.mr_nav.selected.is_some() => {
+                            self.mr_nav.selected = None;
                             self.mr_detail_full = None;
                             self.mr_detail_tab = MrDetailTab::default();
                         }
@@ -396,6 +387,29 @@ impl App {
                         }
                         KeyCode::Right if self.active_tab == Tab::MergeRequests => {
                             self.cycle_mr_filter_forward();
+                        }
+                        KeyCode::Up | KeyCode::Char('k') if self.active_tab == Tab::MergeRequests => {
+                            let count = self.filtered_mr_count();
+                            if self.mr_nav.move_up(count) {
+                                self.load_mr_detail();
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') if self.active_tab == Tab::MergeRequests => {
+                            let count = self.filtered_mr_count();
+                            if self.mr_nav.move_down(count) {
+                                self.load_mr_detail();
+                            }
+                        }
+                        KeyCode::Up | KeyCode::Char('k') if self.active_tab == Tab::Pipelines => {
+                            let count = self.pipelines.len();
+                            self.pipeline_nav.move_up(count);
+                        }
+                        KeyCode::Down | KeyCode::Char('j') if self.active_tab == Tab::Pipelines => {
+                            let count = self.pipelines.len();
+                            self.pipeline_nav.move_down(count);
+                        }
+                        KeyCode::Enter if self.active_tab == Tab::MergeRequests && self.mr_nav.selected.is_some() => {
+                            self.load_mr_detail();
                         }
                         KeyCode::Char('p') => self.project_selector_open = true,
                         KeyCode::Char('f') => {
@@ -472,14 +486,14 @@ impl App {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + 1) % filters.len()].clone();
-        self.mr_list_offset = 0;
+        self.mr_nav.reset();
     }
 
     fn cycle_mr_filter_back(&mut self) {
         let filters = MrFilter::ALL_FILTERS;
         let idx = filters.iter().position(|f| *f == self.mr_filter).unwrap_or(0);
         self.mr_filter = filters[(idx + filters.len() - 1) % filters.len()].clone();
-        self.mr_list_offset = 0;
+        self.mr_nav.reset();
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -564,15 +578,21 @@ impl App {
         }
 
         if mouse.kind == MouseEventKind::ScrollDown {
-            if self.active_tab == Tab::MergeRequests && !self.find_modal_open && !self.settings_open {
-                self.mr_list_scroll_down();
+            if !self.find_modal_open && !self.settings_open {
+                match self.active_tab {
+                    Tab::MergeRequests => self.mr_nav.scroll_down(self.filtered_mr_count()),
+                    Tab::Pipelines => self.pipeline_nav.scroll_down(self.pipelines.len()),
+                }
             }
             return;
         }
 
         if mouse.kind == MouseEventKind::ScrollUp {
-            if self.active_tab == Tab::MergeRequests && !self.find_modal_open && !self.settings_open {
-                self.mr_list_scroll_up();
+            if !self.find_modal_open && !self.settings_open {
+                match self.active_tab {
+                    Tab::MergeRequests => self.mr_nav.scroll_up(),
+                    Tab::Pipelines => self.pipeline_nav.scroll_up(),
+                }
             }
             return;
         }
@@ -652,7 +672,7 @@ impl App {
 
         if let Some(area) = self.click_regions.mr_detail.close {
             if hit(pos, area) {
-                self.selected_mr_index = None;
+                self.mr_nav.selected = None;
                 self.mr_detail_full = None;
                 self.mr_detail_tab = MrDetailTab::default();
                 return;
@@ -740,7 +760,7 @@ impl App {
             if hit(pos, *area) {
                 if let Some(f) = MrFilter::ALL_FILTERS.get(i) {
                     self.mr_filter = f.clone();
-                    self.mr_list_offset = 0;
+                    self.mr_nav.reset();
                 }
                 return;
             }
@@ -749,13 +769,13 @@ impl App {
         if self.active_tab == Tab::MergeRequests {
             for (i, area) in self.click_regions.main.mr_row_areas.iter().enumerate() {
                 if hit(pos, *area) {
-                    let actual_index = self.mr_list_offset + i;
-                    if self.selected_mr_index == Some(actual_index) {
-                        self.selected_mr_index = None;
+                    let actual_index = self.mr_nav.offset + i;
+                    if self.mr_nav.selected == Some(actual_index) {
+                        self.mr_nav.selected = None;
                         self.mr_detail_full = None;
                         self.mr_detail_tab = MrDetailTab::default();
                     } else {
-                        self.selected_mr_index = Some(actual_index);
+                        self.mr_nav.selected = Some(actual_index);
                         self.mr_detail_tab = MrDetailTab::default();
                         self.load_mr_detail();
                     }
@@ -859,6 +879,7 @@ impl App {
             None => return,
         };
         self.pipelines_loading = true;
+        self.pipeline_nav.reset();
         self.last_pipeline_refresh = Some(Instant::now());
 
         let tx = self.message_tx.clone();
@@ -892,7 +913,7 @@ impl App {
         };
         self.mrs_loading = true;
         self.merge_requests.clear();
-        self.mr_list_offset = 0;
+        self.mr_nav.reset();
 
         let tx = self.message_tx.clone();
         let client = self.http_client.clone();
@@ -914,7 +935,7 @@ impl App {
             .filter(|mr| self.mr_filter.matches(&mr.state))
             .collect();
 
-        let mr_iid = match self.selected_mr_index.and_then(|i| filtered.get(i)) {
+        let mr_iid = match self.mr_nav.selected.and_then(|i| filtered.get(i)) {
             Some(mr) => mr.iid,
             None => return,
         };

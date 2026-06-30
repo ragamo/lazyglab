@@ -3,6 +3,7 @@ mod auth;
 mod config;
 mod event;
 mod provider;
+mod table_nav;
 mod theme;
 mod ui;
 

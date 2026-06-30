@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table};
 
 use crate::app::{App, MrFilter, Tab};
 use crate::theme::Theme;
@@ -167,10 +167,10 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
         Tab::MergeRequests => {
-            if app.selected_mr_index.is_some() {
+            if app.mr_nav.selected.is_some() {
                 // Init height on first open
                 if app.mr_detail_height == 0 {
-                    app.mr_detail_height = (area.height / 2 + 2).max(14);
+                    app.mr_detail_height = (area.height * 65 / 100).max(14);
                 }
                 let detail_height = app.mr_detail_height.min(area.height.saturating_sub(6));
                 let table_height = area.height.saturating_sub(detail_height);
@@ -253,13 +253,15 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Clamp offset to valid range
     let visible_rows = content_area.height.saturating_sub(4) as usize; // border + header + margin + border
-    if app.mr_list_offset >= filtered.len() {
-        app.mr_list_offset = filtered.len().saturating_sub(1);
+    app.mr_nav.visible_rows = visible_rows;
+    let max_offset = filtered.len().saturating_sub(visible_rows);
+    if app.mr_nav.offset > max_offset {
+        app.mr_nav.offset = max_offset;
     }
 
     let visible_filtered: Vec<&_> = filtered
         .iter()
-        .skip(app.mr_list_offset)
+        .skip(app.mr_nav.offset)
         .take(visible_rows)
         .copied()
         .collect();
@@ -270,7 +272,11 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let rows: Vec<Row> = visible_filtered
         .iter()
-        .map(|mr| {
+        .enumerate()
+        .map(|(i, mr)| {
+            let actual_index = app.mr_nav.offset + i;
+            let is_selected = app.mr_nav.selected == Some(actual_index);
+
             let status_color = match mr.state.as_str() {
                 "opened" => t.success,
                 "merged" => t.highlight,
@@ -278,18 +284,24 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
                 _ => t.border,
             };
 
-            Row::new(vec![
+            let row = Row::new(vec![
                 Cell::from(format!("!{}", mr.iid)).style(Style::default().fg(status_color)),
                 Cell::from(mr.title.clone()).style(Style::default().fg(t.text)),
                 Cell::from(format!("@{}", mr.author.username)).style(Style::default().fg(t.warning)),
                 Cell::from(mr.source_branch.clone()).style(Style::default().fg(t.info)),
                 Cell::from(mr.updated_at[..10].to_string()).style(Style::default().fg(t.text_dim)),
-            ])
+            ]);
+
+            if is_selected {
+                row.style(Style::default().bg(t.border))
+            } else {
+                row
+            }
         })
         .collect();
 
     let scroll_indicator = if filtered.len() > visible_rows {
-        format!(" {}-{}/{} ", app.mr_list_offset + 1, (app.mr_list_offset + visible_filtered.len()).min(filtered.len()), filtered.len())
+        format!(" {}-{}/{} ", app.mr_nav.offset + 1, (app.mr_nav.offset + visible_filtered.len()).min(filtered.len()), filtered.len())
     } else {
         String::new()
     };
@@ -316,6 +328,24 @@ fn render_merge_requests(frame: &mut Frame, app: &mut App, area: Rect) {
 
     frame.render_widget(table, content_area);
 
+    // Scrollbar (only when content overflows)
+    if filtered.len() > visible_rows {
+        let mut scrollbar_state = ScrollbarState::new(filtered.len().saturating_sub(visible_rows))
+            .position(app.mr_nav.offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: content_area.x + content_area.width.saturating_sub(1),
+            y: content_area.y + 1,
+            width: 1,
+            height: content_area.height.saturating_sub(2),
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
+
     // Register click areas for visible rows (indices map to filtered[offset + i])
     let row_start_y = content_area.y + 3; // border + header + margin
     app.click_regions.main.mr_row_areas = visible_filtered
@@ -339,7 +369,7 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         .filter(|mr| app.mr_filter.matches(&mr.state))
         .collect();
 
-    let mr = match app.selected_mr_index.and_then(|i| filtered.get(i)) {
+    let mr = match app.mr_nav.selected.and_then(|i| filtered.get(i)) {
         Some(mr) => *mr,
         None => return,
     };
@@ -622,14 +652,28 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    let total = app.pipelines.len();
+    let visible_rows = content_area.height.saturating_sub(4) as usize;
+    app.pipeline_nav.visible_rows = visible_rows;
+    app.pipeline_nav.clamp(total);
+
+    let visible: Vec<&_> = app.pipelines
+        .iter()
+        .skip(app.pipeline_nav.offset)
+        .take(visible_rows)
+        .collect();
+
     let header = Row::new(vec!["ID", "Status", "Branch", "URL"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
         .bottom_margin(1);
 
-    let rows: Vec<Row> = app
-        .pipelines
+    let rows: Vec<Row> = visible
         .iter()
-        .map(|p| {
+        .enumerate()
+        .map(|(i, p)| {
+            let actual_index = app.pipeline_nav.offset + i;
+            let is_selected = app.pipeline_nav.selected == Some(actual_index);
+
             let (status_icon, status_color) = match p.status.as_str() {
                 "success" => ("✓", t.success),
                 "failed" => ("✗", t.error),
@@ -639,14 +683,26 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                 _ => ("?", t.border),
             };
 
-            Row::new(vec![
+            let row = Row::new(vec![
                 Cell::from(format!("#{}", p.id)).style(Style::default().fg(t.text_dim)),
                 Cell::from(format!("{} {}", status_icon, p.status)).style(Style::default().fg(status_color)),
                 Cell::from(p.r#ref.clone()).style(Style::default().fg(t.info)),
                 Cell::from(p.web_url.clone()).style(Style::default().fg(t.text_dim)),
-            ])
+            ]);
+
+            if is_selected {
+                row.style(Style::default().bg(t.border))
+            } else {
+                row
+            }
         })
         .collect();
+
+    let scroll_indicator = if total > visible_rows {
+        format!(" {}-{}/{} ", app.pipeline_nav.offset + 1, (app.pipeline_nav.offset + visible.len()).min(total), total)
+    } else {
+        String::new()
+    };
 
     let table = Table::new(
         rows,
@@ -662,10 +718,29 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(t.border)),
+            .border_style(Style::default().fg(t.border))
+            .title_bottom(Line::from(scroll_indicator).right_aligned())
+            .title_style(Style::default().fg(t.text_dim)),
     );
 
     frame.render_widget(table, content_area);
+
+    if total > visible_rows {
+        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(visible_rows))
+            .position(app.pipeline_nav.offset);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: content_area.x + content_area.width.saturating_sub(1),
+            y: content_area.y + 1,
+            width: 1,
+            height: content_area.height.saturating_sub(2),
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {
