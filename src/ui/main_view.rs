@@ -325,31 +325,23 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         None => return,
     };
 
-    let panel_area = area;
-
-    // The top border row of the panel is the drag target
+    // Drag resize area = top border row
     app.mr_detail_resize_area = Some(Rect {
-        x: panel_area.x,
-        y: panel_area.y,
-        width: panel_area.width,
+        x: area.x,
+        y: area.y,
+        width: area.width,
         height: 1,
     });
-
-    let border_style = if app.mr_detail_dragging {
-        Style::default().fg(t.accent)
-    } else {
-        Style::default().fg(t.accent)
-    };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(border_style);
+        .border_style(Style::default().fg(t.accent));
 
-    let inner = block.inner(panel_area);
-    frame.render_widget(block, panel_area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    // [X] close button — top-right corner of the block border
+    // [X] close — top-right corner
     let close_area = Rect {
         x: area.x + area.width.saturating_sub(4),
         y: area.y,
@@ -362,6 +354,67 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.mr_detail_close_area = Some(close_area);
 
+    // Split inner: tabs row + blank line + content
+    let inner_chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(inner);
+
+    // Render tabs
+    let tab_row = inner_chunks[0];
+    let mut x_offset = tab_row.x;
+    let mut tab_areas = Vec::new();
+
+    let tab_spans: Vec<Span> = crate::app::MrDetailTab::ALL
+        .iter()
+        .flat_map(|tab| {
+            let is_active = *tab == app.mr_detail_tab;
+            let style = if is_active {
+                Style::default().fg(t.bg).bg(t.accent).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.text_dim)
+            };
+            let label = tab.label();
+            let width = label.len() as u16;
+            tab_areas.push(Rect {
+                x: x_offset,
+                y: tab_row.y,
+                width,
+                height: 1,
+            });
+            x_offset += width + 1;
+            vec![Span::styled(label, style), Span::raw(" ")]
+        })
+        .collect();
+
+    app.mr_detail_tab_areas = tab_areas;
+    frame.render_widget(Paragraph::new(Line::from(tab_spans)), tab_row);
+
+    // Render content
+    let content_area = inner_chunks[2]; // [1] is blank line
+    match app.mr_detail_tab {
+        crate::app::MrDetailTab::Overview => render_mr_overview(frame, app, mr, content_area),
+        _ => {
+            let placeholder = Paragraph::new(Span::styled(
+                "coming soon",
+                Style::default().fg(t.text_dim),
+            ));
+            frame.render_widget(placeholder, content_area);
+        }
+    }
+}
+
+fn render_mr_overview(
+    frame: &mut Frame,
+    app: &App,
+    mr: &crate::provider::types::MergeRequest,
+    area: Rect,
+) {
+    use ratatui::widgets::Wrap;
+    let t = app.theme;
+
     let status_color = match mr.state.as_str() {
         "opened" => t.success,
         "merged" => t.highlight,
@@ -369,7 +422,15 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         _ => t.border,
     };
 
-    let lines = vec![
+    // Split: metadata (left) | description (right)
+    let cols = Layout::horizontal([
+        Constraint::Length(36),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    // Left: metadata
+    let meta_lines = vec![
         Line::from(vec![
             Span::styled(format!("!{}", mr.iid), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
             Span::styled("  ", Style::default()),
@@ -406,9 +467,34 @@ fn render_mr_detail(frame: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(mr.web_url.clone(), Style::default().fg(t.accent)),
         ]),
     ];
+    frame.render_widget(Paragraph::new(meta_lines), cols[0]);
 
-    let detail = Paragraph::new(lines);
-    frame.render_widget(detail, inner);
+    // Right: description
+    let desc_block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(t.border));
+
+    let desc_inner = desc_block.inner(cols[1]);
+    frame.render_widget(desc_block, cols[1]);
+
+    if app.mr_detail_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading description...", Style::default().fg(t.text_dim))),
+            desc_inner,
+        );
+    } else {
+        let desc_text = app
+            .mr_detail_full
+            .as_ref()
+            .and_then(|m| m.description.as_deref())
+            .filter(|d| !d.trim().is_empty())
+            .unwrap_or("No description");
+
+        let desc = Paragraph::new(desc_text)
+            .style(Style::default().fg(t.text))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(desc, desc_inner);
+    }
 }
 
 fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {

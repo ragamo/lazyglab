@@ -26,6 +26,33 @@ pub enum Tab {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+pub enum MrDetailTab {
+    #[default]
+    Overview,
+    Commits,
+    Pipelines,
+    Changes,
+}
+
+impl MrDetailTab {
+    pub const ALL: &[MrDetailTab] = &[
+        MrDetailTab::Overview,
+        MrDetailTab::Commits,
+        MrDetailTab::Pipelines,
+        MrDetailTab::Changes,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            MrDetailTab::Overview => " overview ",
+            MrDetailTab::Commits => " commits ",
+            MrDetailTab::Pipelines => " pipelines ",
+            MrDetailTab::Changes => " changes ",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum MrFilter {
     #[default]
     Open,
@@ -75,6 +102,7 @@ pub enum AppMessage {
     PipelinesLoaded(Result<Vec<Pipeline>, ProviderError>),
     ProjectsLoaded(Result<Vec<ProjectInfo>, ProviderError>),
     SearchResults(Result<Vec<ProjectInfo>, ProviderError>),
+    MrDetailLoaded(Result<MergeRequest, ProviderError>),
     Tick,
 }
 
@@ -142,6 +170,10 @@ pub struct App {
     pub mr_detail_height: u16,
     pub mr_detail_resize_area: Option<ratatui::prelude::Rect>,
     pub mr_detail_dragging: bool,
+    pub mr_detail_tab: MrDetailTab,
+    pub mr_detail_loading: bool,
+    pub mr_detail_full: Option<MergeRequest>,
+    pub mr_detail_tab_areas: Vec<ratatui::prelude::Rect>,
 }
 
 impl App {
@@ -221,6 +253,10 @@ impl App {
             mr_detail_height: 0,
             mr_detail_resize_area: None,
             mr_detail_dragging: false,
+            mr_detail_tab: MrDetailTab::default(),
+            mr_detail_loading: false,
+            mr_detail_full: None,
+            mr_detail_tab_areas: Vec::new(),
         };
 
         app.try_auto_auth();
@@ -332,6 +368,8 @@ impl App {
                     match key.code {
                         KeyCode::Esc if self.selected_mr_index.is_some() => {
                             self.selected_mr_index = None;
+                            self.mr_detail_full = None;
+                            self.mr_detail_tab = MrDetailTab::default();
                         }
                         KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
                         KeyCode::Char('1') => self.active_tab = Tab::MergeRequests,
@@ -587,9 +625,20 @@ impl App {
             }
         }
 
+        for (i, area) in self.mr_detail_tab_areas.iter().enumerate() {
+            if hit(pos, *area) {
+                if let Some(tab) = MrDetailTab::ALL.get(i) {
+                    self.mr_detail_tab = tab.clone();
+                }
+                return;
+            }
+        }
+
         if let Some(area) = self.mr_detail_close_area {
             if hit(pos, area) {
                 self.selected_mr_index = None;
+                self.mr_detail_full = None;
+                self.mr_detail_tab = MrDetailTab::default();
                 return;
             }
         }
@@ -604,11 +653,15 @@ impl App {
         if self.active_tab == Tab::MergeRequests {
             for (i, area) in self.mr_row_areas.iter().enumerate() {
                 if hit(pos, *area) {
-                    self.selected_mr_index = if self.selected_mr_index == Some(i) {
-                        None
+                    if self.selected_mr_index == Some(i) {
+                        self.selected_mr_index = None;
+                        self.mr_detail_full = None;
+                        self.mr_detail_tab = MrDetailTab::default();
                     } else {
-                        Some(i)
-                    };
+                        self.selected_mr_index = Some(i);
+                        self.mr_detail_tab = MrDetailTab::default();
+                        self.load_mr_detail();
+                    }
                     return;
                 }
             }
@@ -708,6 +761,13 @@ impl App {
             AppMessage::PipelinesLoaded(Err(_)) => {
                 self.pipelines_loading = false;
             }
+            AppMessage::MrDetailLoaded(Ok(mr)) => {
+                self.mr_detail_full = Some(mr);
+                self.mr_detail_loading = false;
+            }
+            AppMessage::MrDetailLoaded(Err(_)) => {
+                self.mr_detail_loading = false;
+            }
             AppMessage::Tick => {
                 if self.screen == AppScreen::Main
                     && self.active_tab == Tab::Pipelines
@@ -787,6 +847,38 @@ impl App {
             let params = ListMrParams { state: MrState::All, page: 1, per_page: 50 };
             let result = provider.list_merge_requests(params).await;
             let _ = tx.send(AppMessage::MergeRequestsLoaded(result));
+        });
+    }
+
+    pub fn load_mr_detail(&mut self) {
+        let filtered: Vec<&MergeRequest> = self
+            .merge_requests
+            .iter()
+            .filter(|mr| self.mr_filter.matches(&mr.state))
+            .collect();
+
+        let mr_iid = match self.selected_mr_index.and_then(|i| filtered.get(i)) {
+            Some(mr) => mr.iid,
+            None => return,
+        };
+
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        self.mr_detail_loading = true;
+        self.mr_detail_full = None;
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.get_merge_request(mr_iid).await;
+            let _ = tx.send(AppMessage::MrDetailLoaded(result));
         });
     }
 

@@ -45,6 +45,8 @@ pub struct MergeRequest {
     pub web_url: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone)]
