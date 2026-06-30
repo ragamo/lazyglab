@@ -44,10 +44,10 @@ impl MrFilter {
 
     pub fn label(&self) -> &'static str {
         match self {
-            MrFilter::Open => "Open",
-            MrFilter::Merged => "Merged",
-            MrFilter::Closed => "Closed",
-            MrFilter::All => "All",
+            MrFilter::Open => "open",
+            MrFilter::Merged => "merged",
+            MrFilter::Closed => "closed",
+            MrFilter::All => "all",
         }
     }
 
@@ -116,6 +116,8 @@ pub struct App {
 
     pub config: AppConfig,
     pub http_client: reqwest::Client,
+    pub logout_link_area: Option<ratatui::prelude::Rect>,
+    pub settings_link_area: Option<ratatui::prelude::Rect>,
 
     // Settings modal
     pub settings_open: bool,
@@ -202,6 +204,8 @@ impl App {
             project_selector_area: None,
             project_items_areas: Vec::new(),
             mr_filter_areas: Vec::new(),
+            logout_link_area: None,
+            settings_link_area: None,
             find_link_area: None,
             find_result_areas: Vec::new(),
             find_star_areas: Vec::new(),
@@ -500,6 +504,20 @@ impl App {
             }
         }
 
+        if let Some(area) = self.logout_link_area {
+            if hit(pos, area) {
+                self.logout();
+                return;
+            }
+        }
+
+        if let Some(area) = self.settings_link_area {
+            if hit(pos, area) {
+                self.settings_open = true;
+                return;
+            }
+        }
+
         if let Some(area) = self.tab_mr_area {
             if hit(pos, area) {
                 self.active_tab = Tab::MergeRequests;
@@ -673,6 +691,18 @@ impl App {
             let result = provider.list_pipelines(Default::default()).await;
             let _ = tx.send(AppMessage::PipelinesLoaded(result));
         });
+    }
+
+    pub fn logout(&mut self) {
+        self.config.auth.token = None;
+        let _ = config::save_config(&self.config);
+        self.token_input.clear();
+        self.current_user = None;
+        self.merge_requests.clear();
+        self.pipelines.clear();
+        self.screen = AppScreen::AuthModal;
+        self.auth_error = None;
+        self.token_source_warning = None;
     }
 
     fn load_merge_requests(&mut self) {

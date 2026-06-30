@@ -83,11 +83,14 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(find_link, find_area);
     app.find_link_area = Some(find_area);
 
+    let right_area = header_layout[1];
+
     let right_text = if let Some(ref user) = app.current_user {
         vec![
             Span::styled("lazyglab", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
             Span::styled(" │ ", Style::default().fg(t.text_dim)),
             Span::styled(format!("@{}", user.username), Style::default().fg(t.success)),
+            Span::styled("  logout", Style::default().fg(t.text_dim)),
             Span::raw(" "),
         ]
     } else {
@@ -98,7 +101,20 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let right_widget = Paragraph::new(Line::from(right_text)).alignment(Alignment::Right);
-    frame.render_widget(right_widget, header_layout[1]);
+    frame.render_widget(right_widget, right_area);
+
+    // logout click area: last ~8 chars on the right
+    if app.current_user.is_some() {
+        let logout_width = 8u16;
+        app.logout_link_area = Some(Rect {
+            x: right_area.x + right_area.width.saturating_sub(logout_width + 1),
+            y: right_area.y,
+            width: logout_width,
+            height: right_area.height,
+        });
+    } else {
+        app.logout_link_area = None;
+    }
 }
 
 fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -126,14 +142,28 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(t.text_dim)
     };
 
-    let mr_tab = Paragraph::new(Span::styled(" ● Merge Requests ", mr_style));
-    let pipe_tab = Paragraph::new(Span::styled(" ● Pipelines ", pipeline_style));
+    let mr_tab = Paragraph::new(Span::styled(" merge requests ", mr_style));
+    let pipe_tab = Paragraph::new(Span::styled(" pipelines ", pipeline_style));
+    let settings_link = Paragraph::new(Span::styled(
+        "settings ",
+        Style::default().fg(t.text_dim),
+    ))
+    .alignment(Alignment::Right);
 
     frame.render_widget(mr_tab, tabs_layout[0]);
     frame.render_widget(pipe_tab, tabs_layout[1]);
+    frame.render_widget(settings_link, tabs_layout[2]);
 
     app.tab_mr_area = Some(tabs_layout[0]);
     app.tab_pipelines_area = Some(tabs_layout[1]);
+
+    let settings_width = 9u16;
+    app.settings_link_area = Some(Rect {
+        x: tabs_layout[2].x + tabs_layout[2].width.saturating_sub(settings_width),
+        y: tabs_layout[2].y,
+        width: settings_width,
+        height: tabs_layout[2].height,
+    });
 }
 
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
