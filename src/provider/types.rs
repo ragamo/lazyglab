@@ -81,3 +81,10 @@ impl Default for ListPipelineParams {
         }
     }
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProjectInfo {
+    pub id: u64,
+    pub name: String,
+    pub path_with_namespace: String,
+}

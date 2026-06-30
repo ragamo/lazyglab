@@ -2,6 +2,7 @@ pub mod splash;
 pub mod auth_modal;
 pub mod main_view;
 pub mod settings_modal;
+pub mod find_modal;
 
 use ratatui::prelude::*;
 
@@ -16,7 +17,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
         crate::app::AppScreen::Main => {
             main_view::render(frame, app);
-            if app.settings_open {
+            if app.find_modal_open {
+                find_modal::render(frame, app);
+            } else if app.settings_open {
                 settings_modal::render(frame, app);
             }
         }

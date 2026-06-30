@@ -175,4 +175,42 @@ impl Provider for GitLabProvider {
 
         Ok(pipelines)
     }
+
+    async fn list_user_projects(&self, page: u32) -> ProviderResult<Vec<ProjectInfo>> {
+        let url = self.api_url("/projects");
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[
+                ("membership", "true"),
+                ("order_by", "last_activity_at"),
+                ("page", &page.to_string()),
+                ("per_page", "20"),
+            ])
+            .send()
+            .await?;
+
+        let projects: Vec<ProjectInfo> = resp.error_for_status()?.json().await?;
+        Ok(projects)
+    }
+
+    async fn search_projects(&self, query: &str) -> ProviderResult<Vec<ProjectInfo>> {
+        let url = self.api_url("/projects");
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[
+                ("search", query),
+                ("per_page", "20"),
+            ])
+            .send()
+            .await?;
+
+        let projects: Vec<ProjectInfo> = resp.error_for_status()?.json().await?;
+        Ok(projects)
+    }
 }

@@ -24,6 +24,15 @@ pub struct AuthConfig {
 pub struct GitLabConfig {
     pub base_url: Option<String>,
     pub project: Option<String>,
+    #[serde(default)]
+    pub favorites: Vec<FavoriteProject>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FavoriteProject {
+    pub id: u64,
+    pub name: String,
+    pub path_with_namespace: String,
 }
 
 impl GitLabConfig {

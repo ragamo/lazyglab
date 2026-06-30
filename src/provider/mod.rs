@@ -28,4 +28,6 @@ pub trait Provider: Send + Sync {
     async fn get_merge_request(&self, mr_id: u64) -> ProviderResult<MergeRequest>;
     async fn get_pipeline_status(&self, mr_id: u64) -> ProviderResult<PipelineStatus>;
     async fn list_pipelines(&self, params: ListPipelineParams) -> ProviderResult<Vec<Pipeline>>;
+    async fn list_user_projects(&self, page: u32) -> ProviderResult<Vec<ProjectInfo>>;
+    async fn search_projects(&self, query: &str) -> ProviderResult<Vec<ProjectInfo>>;
 }

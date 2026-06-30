@@ -32,18 +32,21 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(bg_block, area);
 
     let header_layout = Layout::horizontal([
+        Constraint::Percentage(60),
         Constraint::Min(20),
-        Constraint::Length(30),
     ])
     .split(area);
 
-    let project_name = app
+    let project_path = app
         .projects
         .get(app.selected_project)
         .map(|p| p.path_with_namespace.as_str())
         .unwrap_or("No project");
 
+    let project_name = shorten_path(project_path, 34);
     let selector_text = format!(" ⏷ {} ", project_name);
+    let selector_width = 40u16.min(header_layout[0].width.saturating_sub(7));
+
     let selector = Paragraph::new(Span::styled(
         &selector_text,
         Style::default()
@@ -61,11 +64,24 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     let selector_area = Rect {
         x: header_layout[0].x,
         y: header_layout[0].y,
-        width: header_layout[0].width.min(40),
+        width: selector_width,
         height: header_layout[0].height,
     };
     frame.render_widget(selector, selector_area);
     app.project_selector_area = Some(selector_area);
+
+    let find_link = Paragraph::new(Span::styled(
+        " Find",
+        Style::default().fg(t.accent),
+    ));
+    let find_area = Rect {
+        x: selector_area.x + selector_area.width + 1,
+        y: selector_area.y + 1,
+        width: 5,
+        height: 1,
+    };
+    frame.render_widget(find_link, find_area);
+    app.find_link_area = Some(find_area);
 
     let right_text = if let Some(ref user) = app.current_user {
         vec![
@@ -276,7 +292,13 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
     let t = app.theme;
 
     let dropdown_x = header_area.x;
-    let dropdown_width = 40u16.min(header_area.width);
+    let max_item_len = app
+        .projects
+        .iter()
+        .map(|p| p.path_with_namespace.len() as u16 + 16) // prefix + star + hint
+        .max()
+        .unwrap_or(30);
+    let dropdown_width = (max_item_len + 2).max(50).min(header_area.width);
     let dropdown_height = (app.projects.len() as u16 + 2).min(10);
 
     let dropdown_area = Rect {
@@ -293,13 +315,20 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
         .iter()
         .enumerate()
         .map(|(i, p)| {
-            let style = if i == app.selected_project {
+            let is_selected = i == app.selected_project;
+            let style = if is_selected {
                 Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(t.text)
             };
-            let prefix = if i == app.selected_project { "▸ " } else { "  " };
-            ListItem::new(format!("{}{}", prefix, p.path_with_namespace)).style(style)
+            let prefix = if is_selected { " ▸ ★ " } else { "   ★ " };
+            let suffix = if is_selected { "  [s] unfav" } else { "" };
+            let line = Line::from(vec![
+                Span::styled(prefix, Style::default().fg(t.warning)),
+                Span::styled(p.path_with_namespace.clone(), style),
+                Span::styled(suffix, Style::default().fg(t.text_dim)),
+            ]);
+            ListItem::new(line)
         })
         .collect();
 
@@ -308,7 +337,7 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
             .border_style(Style::default().fg(t.accent))
-            .title(" Select Project ")
+            .title(" Favorites ")
             .title_style(Style::default().fg(t.accent)),
     );
 
@@ -324,6 +353,19 @@ fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) 
         .collect();
 }
 
+fn shorten_path(path: &str, max_len: usize) -> String {
+    if path.len() <= max_len {
+        return path.to_string();
+    }
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.len() <= 2 {
+        return path.to_string();
+    }
+    let first = parts[0];
+    let last = parts[parts.len() - 1];
+    format!("{}/.../{}", first, last)
+}
+
 fn render_footer(frame: &mut Frame, t: &Theme, area: Rect) {
     let hints = vec![
         Span::styled(" q", Style::default().fg(t.accent)),
@@ -334,6 +376,8 @@ fn render_footer(frame: &mut Frame, t: &Theme, area: Rect) {
         Span::styled(" project ", Style::default().fg(t.text_dim)),
         Span::styled(" 1/2", Style::default().fg(t.accent)),
         Span::styled(" tabs ", Style::default().fg(t.text_dim)),
+        Span::styled(" f", Style::default().fg(t.accent)),
+        Span::styled(" find ", Style::default().fg(t.text_dim)),
         Span::styled(" ,", Style::default().fg(t.accent)),
         Span::styled(" settings", Style::default().fg(t.text_dim)),
     ];
