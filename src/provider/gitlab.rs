@@ -427,7 +427,7 @@ impl Provider for GitLabProvider {
         }
 
         let stages = if stage_map.is_empty() {
-            vec![StageStatus { name: "pipeline".to_string(), status: detail.status, jobs: Vec::new() }]
+            vec![StageStatus { name: "pipeline".to_string(), status: detail.status.clone(), jobs: Vec::new() }]
         } else {
             stage_map
         };
@@ -437,6 +437,7 @@ impl Provider for GitLabProvider {
             user: detail.user,
             stages,
             mr_ref: detail.merge_request.map(|mr| PipelineMrRef { iid: mr.iid, title: mr.title }),
+            status: detail.status,
         })
     }
 

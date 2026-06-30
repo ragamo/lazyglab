@@ -700,6 +700,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
             mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
             mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
             stages: &[],
+            tick_frame: app.tick_frame,
         };
         let header = pipeline_card_lines(&view, t, list_area.width);
         let header_len = header.len() as u16;
@@ -707,12 +708,14 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         line_idx += header_len;
 
         // Stage/job lines with click areas
+        use crate::ui::pipeline_view::spinner_char;
+        let spinner = spinner_char(app.tick_frame);
         let stages = enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages);
         for stage in stages {
             let (s_icon, s_color) = match stage.status.as_str() {
                 "success" | "passed" => ("✓", t.success),
                 "failed" => ("✗", t.error),
-                "running" => ("●", t.warning),
+                "running" => (spinner, t.warning),
                 "pending" => ("◌", t.info),
                 "canceled" | "skipped" => ("○", t.text_dim),
                 _ => ("?", t.border),
@@ -727,7 +730,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                 let (j_icon, j_color) = match job.status.as_str() {
                     "success" | "passed" => ("✓", t.success),
                     "failed" => ("✗", t.error),
-                    "running" => ("●", t.warning),
+                    "running" => (spinner, t.warning),
                     "pending" => ("◌", t.info),
                     "canceled" | "skipped" => ("○", t.text_dim),
                     _ => ("○", t.border),
@@ -760,7 +763,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
                     let (sj_icon, sj_color) = match sub.status.as_str() {
                         "success" | "passed" => ("✓", t.success),
                         "failed" => ("✗", t.error),
-                        "running" => ("●", t.warning),
+                        "running" => (spinner, t.warning),
                         "pending" => ("◌", t.info),
                         "canceled" | "skipped" => ("○", t.text_dim),
                         _ => ("○", t.border),
@@ -1102,6 +1105,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
         mr_iid: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.iid),
         mr_title: enriched.and_then(|e| e.mr_ref.as_ref()).map(|m| m.title.as_str()),
         stages: &[],
+        tick_frame: app.tick_frame,
     };
     let header_lines = pipeline_card_lines(&view, t, detail_area.width);
     let header_height = header_lines.len() as u16;
@@ -1113,13 +1117,16 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let row_start = detail_area.y + header_height;
     let scroll = app.pipeline_detail_scroll;
 
+    use crate::ui::pipeline_view::spinner_char;
+    let spinner = spinner_char(app.tick_frame);
+
     let mut line_idx: u16 = 0;
     for stage in stages {
         let (s_icon, s_color) = {
             let (i, c) = match stage.status.as_str() {
                 "success" | "passed" => ("✓", t.success),
                 "failed" => ("✗", t.error),
-                "running" => ("●", t.warning),
+                "running" => (spinner, t.warning),
                 "pending" => ("◌", t.info),
                 "canceled" | "skipped" => ("○", t.text_dim),
                 _ => ("?", t.border),
@@ -1136,7 +1143,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
             let (j_icon, j_color) = match job.status.as_str() {
                 "success" | "passed" => ("✓", t.success),
                 "failed" => ("✗", t.error),
-                "running" => ("●", t.warning),
+                "running" => (spinner, t.warning),
                 "pending" => ("◌", t.info),
                 "canceled" | "skipped" => ("○", t.text_dim),
                 _ => ("○", t.border),
@@ -1171,7 +1178,7 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
                 let (sj_icon, sj_color) = match sub.status.as_str() {
                     "success" | "passed" => ("✓", t.success),
                     "failed" => ("✗", t.error),
-                    "running" => ("●", t.warning),
+                    "running" => (spinner, t.warning),
                     "pending" => ("◌", t.info),
                     "canceled" | "skipped" => ("○", t.text_dim),
                     _ => ("○", t.border),

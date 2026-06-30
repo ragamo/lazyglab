@@ -13,6 +13,13 @@ pub struct PipelineView<'a> {
     pub mr_iid: Option<u64>,
     pub mr_title: Option<&'a str>,
     pub stages: &'a [StageStatus],
+    pub tick_frame: u8,
+}
+
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+pub fn spinner_char(tick: u8) -> &'static str {
+    SPINNER_FRAMES[(tick as usize) % SPINNER_FRAMES.len()]
 }
 
 /// Build display lines for a single pipeline card.
@@ -20,8 +27,13 @@ pub struct PipelineView<'a> {
 pub fn pipeline_card_lines<'a>(p: &PipelineView<'_>, t: &'a Theme, area_width: u16) -> Vec<Line<'a>> {
     let _ = area_width;
     let mut lines: Vec<Line> = Vec::new();
+    let spinner = spinner_char(p.tick_frame);
 
-    let (icon, status_color) = status_style(p.status, t);
+    let (icon, status_color) = if p.status == "running" {
+        (spinner, t.warning)
+    } else {
+        status_style(p.status, t)
+    };
 
     let duration_str = p.duration
         .map(|d| {
@@ -63,20 +75,32 @@ pub fn pipeline_card_lines<'a>(p: &PipelineView<'_>, t: &'a Theme, area_width: u
     // Stages with jobs
     if !p.stages.is_empty() {
         for stage in p.stages {
-            let (s_icon, s_color) = status_style(&stage.status, t);
+            let (s_icon, s_color) = if stage.status == "running" {
+                (spinner, t.warning)
+            } else {
+                status_style(&stage.status, t)
+            };
             lines.push(Line::from(vec![
                 Span::styled(format!("  {} ", s_icon), Style::default().fg(s_color)),
                 Span::styled(stage.name.clone(), Style::default().fg(t.text)),
             ]));
             for job in &stage.jobs {
-                let (j_icon, j_color) = status_style_job(&job.status, t);
+                let (j_icon, j_color) = if job.status == "running" {
+                    (spinner, t.warning)
+                } else {
+                    status_style_job(&job.status, t)
+                };
                 let is_bridge = !job.sub_jobs.is_empty();
                 lines.push(Line::from(vec![
                     Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
                     Span::styled(job.name.clone(), Style::default().fg(if is_bridge { t.text } else { t.text_dim })),
                 ]));
                 for sub in &job.sub_jobs {
-                    let (sj_icon, sj_color) = status_style_job(&sub.status, t);
+                    let (sj_icon, sj_color) = if sub.status == "running" {
+                        (spinner, t.warning)
+                    } else {
+                        status_style_job(&sub.status, t)
+                    };
                     lines.push(Line::from(vec![
                         Span::styled(format!("          {} ", sj_icon), Style::default().fg(sj_color)),
                         Span::styled(sub.name.clone(), Style::default().fg(t.text_dim)),

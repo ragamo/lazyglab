@@ -13,6 +13,7 @@ pub struct AppConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UiConfig {
     pub theme: Option<String>,
+    pub refresh_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

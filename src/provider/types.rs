@@ -132,6 +132,7 @@ pub struct PipelineEnrichedData {
     pub user: Option<PipelineUser>,
     pub stages: Vec<StageStatus>,
     pub mr_ref: Option<PipelineMrRef>,
+    pub status: String,
 }
 
 #[derive(Debug, Clone)]

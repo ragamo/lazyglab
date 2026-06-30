@@ -99,12 +99,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     match app.settings_selected {
         0 => render_theme_tab(frame, app, content_area),
-        _ => {
-            frame.render_widget(
-                Paragraph::new(Span::styled("coming soon", Style::default().fg(t.text_dim))),
-                Rect { x: content_area.x + 2, y: content_area.y + 1, width: content_area.width, height: 1 },
-            );
-        }
+        _ => render_config_tab(frame, app, content_area),
     }
 
     // Footer
@@ -148,4 +143,40 @@ fn render_theme_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     let list_area = Rect { x: area.x, y: area.y, width: (area.width / 3).max(24), height: area.height };
     frame.render_widget(List::new(items), list_area);
+}
+
+fn render_config_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme;
+
+    let label_area = Rect { x: area.x + 2, y: area.y + 1, width: area.width.saturating_sub(4), height: 1 };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("Refresh interval: ", Style::default().fg(t.text)),
+            Span::styled(
+                format!("{} secs", app.settings_refresh_interval),
+                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+            ),
+        ])),
+        label_area,
+    );
+
+    let hint_area = Rect { x: area.x + 2, y: area.y + 3, width: area.width.saturating_sub(4), height: 1 };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("↑↓", Style::default().fg(t.accent)),
+            Span::styled(" adjust (5-120)  ", Style::default().fg(t.text_dim)),
+            Span::styled("↵", Style::default().fg(t.accent)),
+            Span::styled(" save", Style::default().fg(t.text_dim)),
+        ])),
+        hint_area,
+    );
+
+    let desc_area = Rect { x: area.x + 2, y: area.y + 5, width: area.width.saturating_sub(4), height: 1 };
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            "Auto-refresh interval for pipeline detail and job logs when jobs are running.",
+            Style::default().fg(t.text_dim),
+        )),
+        desc_area,
+    );
 }

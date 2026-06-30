@@ -120,8 +120,10 @@ pub enum AppMessage {
     MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
     PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
     PipelineDetailEnrichedLoaded(Result<PipelineEnrichedData, ProviderError>),
+    PipelineDetailRefreshed(Result<PipelineEnrichedData, ProviderError>),
     JobLogLoaded(Result<String, ProviderError>),
     Tick,
+    SpinnerTick,
 }
 
 pub struct App {
@@ -199,6 +201,11 @@ pub struct App {
     pub job_log: String,
     pub job_log_scroll: u16,
     pub selected_job_id: Option<u64>,
+    pub job_log_is_refresh: bool,
+
+    // Auto-refresh
+    pub tick_frame: u8,
+    pub settings_refresh_interval: u64,
 
     // Click areas (grouped by region)
     pub click_regions: ClickRegions,
@@ -209,6 +216,7 @@ impl App {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
         let config = config::load_config().unwrap_or_default();
         let http_client = reqwest::Client::new();
+        let refresh_interval = config.ui.refresh_interval_secs.unwrap_or(10);
 
 
         let active_theme = config
@@ -287,6 +295,9 @@ impl App {
             job_log: String::new(),
             job_log_scroll: 0,
             selected_job_id: None,
+            job_log_is_refresh: false,
+            tick_frame: 0,
+            settings_refresh_interval: refresh_interval,
             click_regions: ClickRegions::default(),
         };
 
@@ -483,7 +494,10 @@ impl App {
                             self.load_merge_requests();
                             self.load_pipelines();
                         }
-                        KeyCode::Char(',') => self.settings_open = true,
+                        KeyCode::Char(',') => {
+                            self.settings_open = true;
+                            self.settings_refresh_interval = self.refresh_interval_secs();
+                        }
                         _ => {}
                     }
                 }
@@ -605,9 +619,23 @@ impl App {
                     self.theme = theme::ALL_THEMES[self.theme_selected];
                 }
             }
+            KeyCode::Up | KeyCode::Char('k') if self.settings_selected == 1 => {
+                if self.settings_refresh_interval < 120 {
+                    self.settings_refresh_interval += 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') if self.settings_selected == 1 => {
+                if self.settings_refresh_interval > 5 {
+                    self.settings_refresh_interval -= 1;
+                }
+            }
             KeyCode::Enter => {
-                self.theme_confirmed = self.theme_selected;
-                self.config.ui.theme = Some(self.theme.name.to_string());
+                if self.settings_selected == 1 {
+                    self.config.ui.refresh_interval_secs = Some(self.settings_refresh_interval);
+                } else {
+                    self.theme_confirmed = self.theme_selected;
+                    self.config.ui.theme = Some(self.theme.name.to_string());
+                }
                 let _ = config::save_config(&self.config);
                 self.settings_open = false;
             }
@@ -882,6 +910,7 @@ impl App {
         if let Some(area) = self.click_regions.header.settings_link {
             if hit(pos, area) {
                 self.settings_open = true;
+                self.settings_refresh_interval = self.refresh_interval_secs();
                 return;
             }
         }
@@ -1092,21 +1121,51 @@ impl App {
             }
             AppMessage::PipelineEnrichedLoaded(_, Err(_)) => {}
             AppMessage::PipelineDetailEnrichedLoaded(Ok(data)) => {
+                if let Some(idx) = self.pipeline_nav.selected {
+                    if let Some(p) = self.pipelines.get_mut(idx) {
+                        p.status = data.status.clone();
+                    }
+                }
                 self.pipeline_detail_enriched = Some(data);
                 self.pipeline_detail_loading = false;
             }
+            AppMessage::PipelineDetailRefreshed(Ok(data)) => {
+                if let Some(idx) = self.pipeline_nav.selected {
+                    if let Some(p) = self.pipelines.get_mut(idx) {
+                        p.status = data.status.clone();
+                    }
+                }
+                self.pipeline_detail_enriched = Some(data);
+            }
+            AppMessage::PipelineDetailRefreshed(Err(_)) => {}
             AppMessage::PipelineDetailEnrichedLoaded(Err(_)) => {
                 self.pipeline_detail_loading = false;
             }
             AppMessage::JobLogLoaded(Ok(log)) => {
+                let is_refresh = self.job_log_is_refresh;
                 self.job_log = log;
                 self.job_log_loading = false;
+                self.job_log_is_refresh = false;
+                if is_refresh {
+                    let total_lines = self.job_log.lines().count() as u16;
+                    self.job_log_scroll = total_lines.saturating_sub(1);
+                }
             }
             AppMessage::JobLogLoaded(Err(_)) => {
                 self.job_log = "Failed to load log.".to_string();
                 self.job_log_loading = false;
             }
-            AppMessage::Tick => {}
+            AppMessage::SpinnerTick => {
+                self.tick_frame = self.tick_frame.wrapping_add(1);
+            }
+            AppMessage::Tick => {
+                if self.pipeline_detail_open && self.has_running_jobs() {
+                    self.refresh_pipeline_detail();
+                }
+                if self.job_log_open && self.is_selected_job_running() {
+                    self.refresh_job_log();
+                }
+            }
         }
     }
 
@@ -1174,6 +1233,73 @@ impl App {
             let result = provider.get_job_log(job_id).await;
             let _ = tx.send(AppMessage::JobLogLoaded(result));
         });
+    }
+
+    pub fn refresh_pipeline_detail(&mut self) {
+        let pipeline_id = match self.pipeline_nav.selected.and_then(|i| self.pipelines.get(i)) {
+            Some(p) => p.id,
+            None => return,
+        };
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.get_pipeline_enriched(pipeline_id).await;
+            let _ = tx.send(AppMessage::PipelineDetailRefreshed(result));
+        });
+    }
+
+    pub fn refresh_job_log(&mut self) {
+        let job_id = match self.selected_job_id {
+            Some(id) => id,
+            None => return,
+        };
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        self.job_log_is_refresh = true;
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.get_job_log(job_id).await;
+            let _ = tx.send(AppMessage::JobLogLoaded(result));
+        });
+    }
+
+    pub fn refresh_interval_secs(&self) -> u64 {
+        self.config.ui.refresh_interval_secs.unwrap_or(10)
+    }
+
+    pub fn has_running_jobs(&self) -> bool {
+        self.pipeline_detail_enriched.as_ref().map_or(false, |data| {
+            data.stages.iter().any(|stage| {
+                stage.jobs.iter().any(|job| job.status == "running")
+            })
+        })
+    }
+
+    pub fn is_selected_job_running(&self) -> bool {
+        let job_id = match self.selected_job_id {
+            Some(id) => id,
+            None => return false,
+        };
+        self.pipeline_detail_enriched.as_ref().map_or(false, |data| {
+            data.stages.iter().any(|stage| {
+                stage.jobs.iter().any(|job| job.id == job_id && job.status == "running")
+            })
+        })
     }
 
     pub fn load_pipelines(&mut self) {

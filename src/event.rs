@@ -15,6 +15,10 @@ pub async fn run_event_loop(
     app: &mut App,
 ) -> Result<()> {
     let mut event_stream = EventStream::new();
+    let mut tick_interval = time::interval(Duration::from_secs(app.refresh_interval_secs()));
+    tick_interval.reset();
+    let mut spinner_interval = time::interval(Duration::from_millis(100));
+    spinner_interval.reset();
 
     loop {
         let app_ref = &mut *app;
@@ -32,6 +36,14 @@ pub async fn run_event_loop(
             }
             Some(msg) = app.message_rx.recv() => {
                 app.handle_message(msg);
+            }
+            _ = tick_interval.tick() => {
+                app.handle_message(AppMessage::Tick);
+                tick_interval = time::interval(Duration::from_secs(app.refresh_interval_secs()));
+                tick_interval.reset();
+            }
+            _ = spinner_interval.tick() => {
+                app.handle_message(AppMessage::SpinnerTick);
             }
         }
     }
