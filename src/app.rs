@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crossterm::event::{Event, KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc;
 
@@ -70,8 +72,10 @@ pub struct Project {
 pub enum AppMessage {
     TokenValidated(Result<User, ProviderError>),
     MergeRequestsLoaded(Result<Vec<MergeRequest>, ProviderError>),
+    PipelinesLoaded(Result<Vec<Pipeline>, ProviderError>),
     ProjectsLoaded(Result<Vec<ProjectInfo>, ProviderError>),
     SearchResults(Result<Vec<ProjectInfo>, ProviderError>),
+    Tick,
 }
 
 pub struct App {
@@ -88,6 +92,11 @@ pub struct App {
     pub merge_requests: Vec<MergeRequest>,
     pub mrs_loading: bool,
     pub pipelines: Vec<Pipeline>,
+    pub pipelines_loading: bool,
+    pub autoreload_pipelines: bool,
+    pub refresh_interval_secs: u64,
+    pub last_pipeline_refresh: Option<Instant>,
+    pub autoreload_checkbox_area: Option<ratatui::prelude::Rect>,
 
     pub active_tab: Tab,
     pub mr_filter: MrFilter,
@@ -158,6 +167,11 @@ impl App {
             merge_requests: Vec::new(),
             mrs_loading: false,
             pipelines: Vec::new(),
+            pipelines_loading: false,
+            autoreload_pipelines: true,
+            refresh_interval_secs: 30,
+            last_pipeline_refresh: None,
+            autoreload_checkbox_area: None,
             active_tab: Tab::default(),
             mr_filter: MrFilter::default(),
             projects: config.gitlab.favorites.iter().map(|f| Project {
@@ -288,6 +302,7 @@ impl App {
                         KeyCode::Enter => {
                             self.project_selector_open = false;
                             self.load_merge_requests();
+                            self.load_pipelines();
                         }
                         KeyCode::Char('s') => {
                             if let Some(project) = self.projects.get(self.selected_project) {
@@ -321,6 +336,10 @@ impl App {
                             self.find_results.clear();
                             self.find_selected = 0;
                         }
+                        KeyCode::Char('r') => {
+                            self.load_merge_requests();
+                            self.load_pipelines();
+                        }
                         KeyCode::Char(',') => self.settings_open = true,
                         _ => {}
                     }
@@ -347,6 +366,7 @@ impl App {
                         .unwrap_or(0);
                     self.find_modal_open = false;
                     self.load_merge_requests();
+                    self.load_pipelines();
                 }
             }
             KeyCode::Up => {
@@ -465,6 +485,7 @@ impl App {
                     self.selected_project = i;
                     self.project_selector_open = false;
                     self.load_merge_requests();
+                    self.load_pipelines();
                     return;
                 }
             }
@@ -490,6 +511,15 @@ impl App {
             if hit(pos, area) {
                 self.active_tab = Tab::Pipelines;
                 return;
+            }
+        }
+
+        if self.active_tab == Tab::Pipelines {
+            if let Some(area) = self.autoreload_checkbox_area {
+                if hit(pos, area) {
+                    self.autoreload_pipelines = !self.autoreload_pipelines;
+                    return;
+                }
             }
         }
 
@@ -556,6 +586,7 @@ impl App {
 
                 if !self.projects.is_empty() {
                     self.load_merge_requests();
+                    self.load_pipelines();
                 }
             }
             AppMessage::TokenValidated(Err(e)) => {
@@ -588,6 +619,22 @@ impl App {
             AppMessage::MergeRequestsLoaded(Err(_)) => {
                 self.mrs_loading = false;
             }
+            AppMessage::PipelinesLoaded(Ok(pipelines)) => {
+                self.pipelines = pipelines;
+                self.pipelines_loading = false;
+            }
+            AppMessage::PipelinesLoaded(Err(_)) => {
+                self.pipelines_loading = false;
+            }
+            AppMessage::Tick => {
+                if self.screen == AppScreen::Main
+                    && self.active_tab == Tab::Pipelines
+                    && self.autoreload_pipelines
+                    && !self.projects.is_empty()
+                {
+                    self.load_pipelines();
+                }
+            }
         }
     }
 
@@ -605,6 +652,26 @@ impl App {
             let provider = GitLabProvider::new(client, token, base_url, String::new());
             let result = provider.search_projects(&query).await;
             let _ = tx.send(AppMessage::SearchResults(result));
+        });
+    }
+
+    pub fn load_pipelines(&mut self) {
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        self.pipelines_loading = true;
+        self.last_pipeline_refresh = Some(Instant::now());
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.list_pipelines(Default::default()).await;
+            let _ = tx.send(AppMessage::PipelinesLoaded(result));
         });
     }
 

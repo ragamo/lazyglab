@@ -139,7 +139,7 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_content(frame: &mut Frame, app: &mut App, area: Rect) {
     match app.active_tab {
         Tab::MergeRequests => render_merge_requests(frame, app, area),
-        Tab::Pipelines => render_pipelines(frame, app, area),
+        Tab::Pipelines => render_pipelines(frame, app, area),  // already &mut App
     }
 }
 
@@ -276,8 +276,74 @@ fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {
+fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    let top = chunks[0];
+
+    let checkbox = if app.autoreload_pipelines { "☑" } else { "☐" };
+    let checkbox_style = if app.autoreload_pipelines {
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(t.text_dim)
+    };
+
+    let countdown = if app.autoreload_pipelines {
+        if let Some(last) = app.last_pipeline_refresh {
+            let elapsed = last.elapsed().as_secs();
+            let remaining = app.refresh_interval_secs.saturating_sub(elapsed);
+            format!(" {}s", remaining)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let hints = Line::from(vec![
+        Span::styled(format!("{} autoreload", checkbox), checkbox_style),
+        Span::styled(countdown, Style::default().fg(t.text_dim)),
+    ]);
+    frame.render_widget(Paragraph::new(hints), top);
+
+    // checkbox click area: covers "☑ autoreload" (13 chars)
+    app.autoreload_checkbox_area = Some(Rect { x: top.x, y: top.y, width: 14, height: 1 });
+
+    let content_area = chunks[1];
+
+    if app.pipelines_loading {
+        let loading = Paragraph::new("Loading pipelines...")
+            .style(Style::default().fg(t.text_dim))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(t.border)),
+            );
+        frame.render_widget(loading, content_area);
+        return;
+    }
+
+    if app.pipelines.is_empty() {
+        let empty = Paragraph::new("No project selected or no pipelines")
+            .style(Style::default().fg(t.text_dim))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_style(Style::default().fg(t.border)),
+            );
+        frame.render_widget(empty, content_area);
+        return;
+    }
 
     let header = Row::new(vec!["ID", "Status", "Branch", "URL"])
         .style(Style::default().fg(t.text_dim).add_modifier(Modifier::BOLD))
@@ -322,7 +388,7 @@ fn render_pipelines(frame: &mut Frame, app: &App, area: Rect) {
             .border_style(Style::default().fg(t.border)),
     );
 
-    frame.render_widget(table, area);
+    frame.render_widget(table, content_area);
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {
@@ -415,6 +481,8 @@ fn render_footer(frame: &mut Frame, t: &Theme, area: Rect) {
         Span::styled(" tabs ", Style::default().fg(t.text_dim)),
         Span::styled(" f", Style::default().fg(t.accent)),
         Span::styled(" find ", Style::default().fg(t.text_dim)),
+        Span::styled(" r", Style::default().fg(t.accent)),
+        Span::styled(" refresh ", Style::default().fg(t.text_dim)),
         Span::styled(" ,", Style::default().fg(t.accent)),
         Span::styled(" settings", Style::default().fg(t.text_dim)),
     ];
