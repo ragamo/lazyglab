@@ -4,6 +4,7 @@ pub mod main_view;
 pub mod settings_modal;
 pub mod find_modal;
 pub mod click_regions;
+pub mod pipeline_view;
 
 use ratatui::prelude::*;
 

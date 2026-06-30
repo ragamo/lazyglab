@@ -3,6 +3,7 @@ use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, R
 
 use crate::app::{App, MrFilter, Tab};
 use crate::theme::Theme;
+use crate::ui::pipeline_view::{pipeline_card_lines, PipelineView};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -668,103 +669,20 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    let empty_stages = vec![];
     let mut lines: Vec<Line> = Vec::new();
     for pipeline in &app.mr_pipelines {
-        let (icon, status_color) = match pipeline.status.as_str() {
-            "success" => ("✓", t.success),
-            "failed" => ("✗", t.error),
-            "running" => ("●", t.warning),
-            "pending" => ("◌", t.info),
-            "canceled" => ("○", t.text_dim),
-            _ => ("?", t.border),
-        };
-
         let enriched = app.mr_pipeline_enriched.get(&pipeline.id);
-
-        let duration_str = enriched
-            .and_then(|e| e.duration)
-            .map(|d| {
-                let mins = d / 60;
-                let secs = d % 60;
-                if mins > 0 { format!("{}m {}s", mins, secs) } else { format!("{}s", secs) }
-            })
-            .unwrap_or_else(|| "—".to_string());
-
-        let time_ago = format_time_ago(&pipeline.created_at);
-
-        // Line 1: status icon + status | duration | time ago
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} {}", icon, pipeline.status), Style::default().fg(status_color)),
-            Span::styled("  │  ", Style::default().fg(t.text_dim)),
-            Span::styled(format!("⏱ {}", duration_str), Style::default().fg(t.text)),
-            Span::styled("  │  ", Style::default().fg(t.text_dim)),
-            Span::styled(time_ago, Style::default().fg(t.text_dim)),
-        ]));
-
-        // Line 2: Pipeline ID + ref + triggered by
-        let user = enriched
-            .and_then(|e| e.user.as_ref())
-            .map(|u| format!("@{}", u.username))
-            .unwrap_or_else(|| "…".to_string());
-        lines.push(Line::from(vec![
-            Span::styled(format!("#{}", pipeline.id), Style::default().fg(t.accent)),
-            Span::styled(" — ", Style::default().fg(t.text_dim)),
-            Span::styled(pipeline.r#ref.clone(), Style::default().fg(t.info)),
-            Span::styled(" by ", Style::default().fg(t.text_dim)),
-            Span::styled(user, Style::default().fg(t.warning)),
-        ]));
-
-        // Stages with jobs
-        if let Some(stages) = enriched.map(|e| &e.stages).filter(|s| !s.is_empty()) {
-            for stage in stages {
-                let (s_icon, s_color) = match stage.status.as_str() {
-                    "success" => ("●", t.success),
-                    "failed" => ("●", t.error),
-                    "running" => ("●", t.warning),
-                    "pending" => ("○", t.info),
-                    "canceled" | "skipped" => ("○", t.text_dim),
-                    _ => ("○", t.border),
-                };
-                // Stage header
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", s_icon), Style::default().fg(s_color)),
-                    Span::styled(&stage.name, Style::default().fg(t.text)),
-                ]));
-                // Jobs within stage
-                for job in &stage.jobs {
-                    let (j_icon, j_color) = match job.status.as_str() {
-                        "success" => ("✓", t.success),
-                        "failed" => ("✗", t.error),
-                        "running" => ("●", t.warning),
-                        "pending" => ("◌", t.info),
-                        "canceled" | "skipped" => ("○", t.text_dim),
-                        _ => ("○", t.border),
-                    };
-                    let is_bridge = !job.sub_jobs.is_empty();
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("      {} ", j_icon), Style::default().fg(j_color)),
-                        Span::styled(&job.name, Style::default().fg(if is_bridge { t.text } else { t.text_dim })),
-                    ]));
-                    // Sub-jobs (downstream pipeline jobs)
-                    for sub in &job.sub_jobs {
-                        let (sj_icon, sj_color) = match sub.status.as_str() {
-                            "success" => ("✓", t.success),
-                            "failed" => ("✗", t.error),
-                            "running" => ("●", t.warning),
-                            "pending" => ("◌", t.info),
-                            "canceled" | "skipped" => ("○", t.text_dim),
-                            _ => ("○", t.border),
-                        };
-                        lines.push(Line::from(vec![
-                            Span::styled(format!("          {} ", sj_icon), Style::default().fg(sj_color)),
-                            Span::styled(&sub.name, Style::default().fg(t.text_dim)),
-                        ]));
-                    }
-                }
-            }
-        }
-
-        // Separator
+        let view = PipelineView {
+            id: pipeline.id,
+            status: &pipeline.status,
+            r#ref: &pipeline.r#ref,
+            created_at: &pipeline.created_at,
+            duration: enriched.and_then(|e| e.duration),
+            user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
+            stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
+        };
+        lines.extend(pipeline_card_lines(&view, t, area.width));
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "─".repeat(area.width.saturating_sub(1) as usize),
@@ -772,33 +690,7 @@ fn render_mr_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
         )));
     }
 
-    let visible_height = area.height;
-    let content_height = lines.len() as u16;
-    let max_scroll = content_height.saturating_sub(visible_height);
-    if app.mr_pipelines_scroll > max_scroll {
-        app.mr_pipelines_scroll = max_scroll;
-    }
-
-    let paragraph = Paragraph::new(lines)
-        .scroll((app.mr_pipelines_scroll, 0));
-    frame.render_widget(paragraph, area);
-
-    if content_height > visible_height {
-        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-            .position(app.mr_pipelines_scroll as usize);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(None)
-            .end_symbol(None)
-            .track_style(Style::default().fg(t.border))
-            .thumb_style(Style::default().fg(t.accent));
-        let scrollbar_area = Rect {
-            x: area.x + area.width.saturating_sub(1),
-            y: area.y,
-            width: 1,
-            height: area.height,
-        };
-        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
-    }
+    render_scrollable_lines(frame, &mut app.mr_pipelines_scroll, lines, area, t);
 }
 
 fn format_time_ago(date_str: &str) -> String {
@@ -876,44 +768,7 @@ fn render_mr_filters(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
-
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .split(area);
-
-    let top = chunks[0];
-
-    let checkbox = if app.autoreload_pipelines { "☑" } else { "☐" };
-    let checkbox_style = if app.autoreload_pipelines {
-        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(t.text_dim)
-    };
-
-    let countdown = if app.autoreload_pipelines {
-        if let Some(last) = app.last_pipeline_refresh {
-            let elapsed = last.elapsed().as_secs();
-            let remaining = app.refresh_interval_secs.saturating_sub(elapsed);
-            format!(" {}s", remaining)
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    let hints = Line::from(vec![
-        Span::styled(format!("{} autoreload", checkbox), checkbox_style),
-        Span::styled(countdown, Style::default().fg(t.text_dim)),
-    ]);
-    frame.render_widget(Paragraph::new(hints), top);
-
-    // checkbox click area: covers "☑ autoreload" (13 chars)
-    app.click_regions.main.autoreload_checkbox = Some(Rect { x: top.x, y: top.y, width: 14, height: 1 });
-
-    let content_area = chunks[1];
+    let content_area = area;
 
     if app.pipelines_loading {
         let loading = Paragraph::new("Loading pipelines...")
@@ -1047,10 +902,32 @@ fn render_pipelines(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+fn render_scrollable_lines(frame: &mut Frame, scroll: &mut u16, lines: Vec<Line>, area: Rect, t: &Theme) {
+    let visible_height = area.height;
+    let content_height = lines.len() as u16;
+    let max_scroll = content_height.saturating_sub(visible_height);
+    if *scroll > max_scroll { *scroll = max_scroll; }
+
+    frame.render_widget(Paragraph::new(lines).scroll((*scroll, 0)), area);
+
+    if content_height > visible_height {
+        let mut state = ScrollbarState::new(max_scroll as usize).position(*scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None).end_symbol(None)
+            .track_style(Style::default().fg(t.border))
+            .thumb_style(Style::default().fg(t.accent));
+        let scrollbar_area = Rect {
+            x: area.x + area.width.saturating_sub(1),
+            y: area.y, width: 1, height: area.height,
+        };
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
+    }
+}
+
 fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
 
-    let pipeline = match app.pipeline_nav.selected.and_then(|i| app.pipelines.get(i)) {
+    let pipeline = match app.pipeline_nav.selected.and_then(|i| app.pipelines.get(i)).cloned() {
         Some(p) => p,
         None => return,
     };
@@ -1062,15 +939,6 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
-
-    let title = format!(
-        "Pipeline #{} — {} ({})",
-        pipeline.id, pipeline.status, pipeline.r#ref
-    );
-    frame.render_widget(
-        Paragraph::new(Span::styled(title, Style::default().fg(t.text).add_modifier(Modifier::BOLD))),
-        inner,
-    );
 
     // Close button [X]
     let close_area = Rect {
@@ -1085,6 +953,33 @@ fn render_pipeline_detail(frame: &mut Frame, app: &mut App, area: Rect) {
     );
     app.click_regions.pipeline_detail.bounds = Some(area);
     app.click_regions.pipeline_detail.close = Some(close_area);
+
+    // Content
+    let empty_stages = vec![];
+    let enriched = app.pipeline_detail_enriched.as_ref();
+
+    if app.pipeline_detail_loading {
+        frame.render_widget(
+            Paragraph::new(Span::styled("Loading...", Style::default().fg(t.text_dim))),
+            inner,
+        );
+        return;
+    }
+
+    // Use a dummy created_at since Pipeline doesn't have it — show basic info
+    let created_at = enriched.is_some().then_some("").unwrap_or("");
+    let view = PipelineView {
+        id: pipeline.id,
+        status: &pipeline.status,
+        r#ref: &pipeline.r#ref,
+        created_at,
+        duration: enriched.and_then(|e| e.duration),
+        user: enriched.and_then(|e| e.user.as_ref()).map(|u| u.username.as_str()),
+        stages: enriched.map(|e| e.stages.as_slice()).unwrap_or(&empty_stages),
+    };
+
+    let lines = pipeline_card_lines(&view, t, inner.width);
+    render_scrollable_lines(frame, &mut app.pipeline_detail_scroll, lines, inner, t);
 }
 
 fn render_project_dropdown(frame: &mut Frame, app: &mut App, header_area: Rect) {

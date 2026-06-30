@@ -118,6 +118,7 @@ pub enum AppMessage {
     MrCommitsLoaded(Result<Vec<Commit>, ProviderError>),
     MrPipelinesLoaded(Result<Vec<MrPipeline>, ProviderError>),
     PipelineEnrichedLoaded(u64, Result<PipelineEnrichedData, ProviderError>),
+    PipelineDetailEnrichedLoaded(Result<PipelineEnrichedData, ProviderError>),
     Tick,
 }
 
@@ -136,9 +137,6 @@ pub struct App {
     pub mrs_loading: bool,
     pub pipelines: Vec<Pipeline>,
     pub pipelines_loading: bool,
-    pub autoreload_pipelines: bool,
-    pub refresh_interval_secs: u64,
-    pub last_pipeline_refresh: Option<Instant>,
     pub active_tab: Tab,
     pub mr_filter: MrFilter,
     pub projects: Vec<Project>,
@@ -189,6 +187,9 @@ pub struct App {
     // Pipeline detail state
     pub pipeline_detail_open: bool,
     pub pipeline_detail_height: u16,
+    pub pipeline_detail_enriched: Option<PipelineEnrichedData>,
+    pub pipeline_detail_loading: bool,
+    pub pipeline_detail_scroll: u16,
 
     // Click areas (grouped by region)
     pub click_regions: ClickRegions,
@@ -226,9 +227,6 @@ impl App {
             mrs_loading: false,
             pipelines: Vec::new(),
             pipelines_loading: false,
-            autoreload_pipelines: true,
-            refresh_interval_secs: 30,
-            last_pipeline_refresh: None,
             active_tab: Tab::default(),
             mr_filter: MrFilter::default(),
             projects: config.gitlab.favorites.iter().map(|f| Project {
@@ -272,6 +270,9 @@ impl App {
             mr_pipeline_enriched: HashMap::new(),
             pipeline_detail_open: false,
             pipeline_detail_height: 0,
+            pipeline_detail_enriched: None,
+            pipeline_detail_loading: false,
+            pipeline_detail_scroll: 0,
             click_regions: ClickRegions::default(),
         };
 
@@ -452,7 +453,7 @@ impl App {
                             self.pipeline_nav.move_down(count);
                         }
                         KeyCode::Enter if self.active_tab == Tab::Pipelines && self.pipeline_nav.selected.is_some() => {
-                            self.pipeline_detail_open = true;
+                            self.open_pipeline_detail();
                         }
                         KeyCode::Enter if self.active_tab == Tab::MergeRequests && self.mr_nav.selected.is_some() => {
                             self.load_mr_detail();
@@ -657,6 +658,14 @@ impl App {
                         }
                     }
                 }
+                if self.pipeline_detail_open && self.active_tab == Tab::Pipelines {
+                    if let Some(bounds) = self.click_regions.pipeline_detail.bounds {
+                        if hit(pos, bounds) {
+                            self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_add(3);
+                            return;
+                        }
+                    }
+                }
                 match self.active_tab {
                     Tab::MergeRequests => self.mr_nav.scroll_down(self.filtered_mr_count()),
                     Tab::Pipelines => self.pipeline_nav.scroll_down(self.pipelines.len()),
@@ -676,6 +685,14 @@ impl App {
                                 MrDetailTab::Pipelines => self.mr_pipelines_scroll = self.mr_pipelines_scroll.saturating_sub(3),
                                 _ => {}
                             }
+                            return;
+                        }
+                    }
+                }
+                if self.pipeline_detail_open && self.active_tab == Tab::Pipelines {
+                    if let Some(bounds) = self.click_regions.pipeline_detail.bounds {
+                        if hit(pos, bounds) {
+                            self.pipeline_detail_scroll = self.pipeline_detail_scroll.saturating_sub(3);
                             return;
                         }
                     }
@@ -838,14 +855,7 @@ impl App {
             }
         }
 
-        if self.active_tab == Tab::Pipelines {
-            if let Some(area) = self.click_regions.main.autoreload_checkbox {
-                if hit(pos, area) {
-                    self.autoreload_pipelines = !self.autoreload_pipelines;
-                    return;
-                }
-            }
-        }
+
 
         for (i, area) in self.click_regions.main.mr_filter_areas.iter().enumerate() {
             if hit(pos, *area) {
@@ -899,7 +909,7 @@ impl App {
                         self.pipeline_detail_open = false;
                     } else {
                         self.pipeline_nav.selected = Some(actual_index);
-                        self.pipeline_detail_open = true;
+                        self.open_pipeline_detail();
                     }
                     return;
                 }
@@ -1000,15 +1010,14 @@ impl App {
                 self.mr_pipeline_enriched.insert(pipeline_id, data);
             }
             AppMessage::PipelineEnrichedLoaded(_, Err(_)) => {}
-            AppMessage::Tick => {
-                if self.screen == AppScreen::Main
-                    && self.active_tab == Tab::Pipelines
-                    && self.autoreload_pipelines
-                    && !self.projects.is_empty()
-                {
-                    self.load_pipelines();
-                }
+            AppMessage::PipelineDetailEnrichedLoaded(Ok(data)) => {
+                self.pipeline_detail_enriched = Some(data);
+                self.pipeline_detail_loading = false;
             }
+            AppMessage::PipelineDetailEnrichedLoaded(Err(_)) => {
+                self.pipeline_detail_loading = false;
+            }
+            AppMessage::Tick => {}
         }
     }
 
@@ -1029,6 +1038,31 @@ impl App {
         });
     }
 
+    pub fn open_pipeline_detail(&mut self) {
+        let pipeline_id = match self.pipeline_nav.selected.and_then(|i| self.pipelines.get(i)) {
+            Some(p) => p.id,
+            None => return,
+        };
+        let project = match self.projects.get(self.selected_project) {
+            Some(p) => p.clone(),
+            None => return,
+        };
+        self.pipeline_detail_open = true;
+        self.pipeline_detail_enriched = None;
+        self.pipeline_detail_loading = true;
+        self.pipeline_detail_scroll = 0;
+
+        let tx = self.message_tx.clone();
+        let client = self.http_client.clone();
+        let token = self.token_input.clone();
+        let base_url = self.config.gitlab.base_url_or_default().to_string();
+        tokio::spawn(async move {
+            let provider = GitLabProvider::new(client, token, base_url, project.path_with_namespace);
+            let result = provider.get_pipeline_enriched(pipeline_id).await;
+            let _ = tx.send(AppMessage::PipelineDetailEnrichedLoaded(result));
+        });
+    }
+
     pub fn load_pipelines(&mut self) {
         let project = match self.projects.get(self.selected_project) {
             Some(p) => p.clone(),
@@ -1037,7 +1071,6 @@ impl App {
         self.pipelines_loading = true;
         self.pipeline_nav.reset();
         self.pipeline_detail_open = false;
-        self.last_pipeline_refresh = Some(Instant::now());
 
         let tx = self.message_tx.clone();
         let client = self.http_client.clone();

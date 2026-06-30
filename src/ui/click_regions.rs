@@ -36,7 +36,6 @@ pub struct MainRegion {
     pub mr_filter_areas: Vec<Rect>,
     pub mr_row_areas: Vec<Rect>,
     pub pipeline_row_areas: Vec<Rect>,
-    pub autoreload_checkbox: Option<Rect>,
 }
 
 #[derive(Default)]
