@@ -108,22 +108,22 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(right_widget, right_area);
 
     if app.current_user.is_some() {
-        // logout click area: last ~8 chars on the right
+        // logout click area: last ~8 chars on the top row (where the text is)
         let logout_width = 8u16;
         app.click_regions.header.logout_link = Some(Rect {
             x: right_area.x + right_area.width.saturating_sub(logout_width + 1),
             y: right_area.y,
             width: logout_width,
-            height: right_area.height,
+            height: 1,
         });
     } else {
-        // login click area: last ~6 chars on the right
+        // login click area: last ~6 chars on the top row (where the text is)
         let login_width = 6u16;
         app.click_regions.header.login_link = Some(Rect {
             x: right_area.x + right_area.width.saturating_sub(login_width + 1),
             y: right_area.y,
             width: login_width,
-            height: right_area.height,
+            height: 1,
         });
     }
 }
@@ -161,17 +161,25 @@ fn render_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     ))
     .alignment(Alignment::Right);
 
+    // Render the settings link one line above the tabs bar
+    let settings_row = Rect {
+        x: tabs_layout[2].x,
+        y: tabs_layout[2].y.saturating_sub(1),
+        width: tabs_layout[2].width,
+        height: 1,
+    };
+
     frame.render_widget(mr_tab, tabs_layout[0]);
     frame.render_widget(pipe_tab, tabs_layout[1]);
-    frame.render_widget(settings_link, tabs_layout[2]);
+    frame.render_widget(settings_link, settings_row);
 
     app.click_regions.header.tab_mr = Some(tabs_layout[0]);
     app.click_regions.header.tab_pipelines = Some(tabs_layout[1]);
 
     let settings_width = 9u16;
     app.click_regions.header.settings_link = Some(Rect {
-        x: tabs_layout[2].x + tabs_layout[2].width.saturating_sub(settings_width),
-        y: tabs_layout[2].y,
+        x: settings_row.x + settings_row.width.saturating_sub(settings_width),
+        y: settings_row.y,
         width: settings_width,
         height: tabs_layout[2].height,
     });
