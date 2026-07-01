@@ -15,7 +15,6 @@ use crate::ui::click_regions::ClickRegions;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppScreen {
-    Splash,
     Main,
 }
 
@@ -252,7 +251,7 @@ impl App {
         let header_bg_soft = config.ui.header_bg.as_deref() != Some("hard");
 
         let mut app = Self {
-            screen: AppScreen::Splash,
+            screen: AppScreen::Main,
             should_quit: false,
             token_input: String::new(),
             token_source_warning: None,
@@ -410,11 +409,6 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         match self.screen {
-            AppScreen::Splash => {
-                if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                    self.should_quit = true;
-                }
-            }
             AppScreen::Main => {
                 if self.auth_open {
                     self.handle_auth_key(key);
