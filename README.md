@@ -4,7 +4,7 @@ A terminal UI (TUI) for GitLab — browse merge requests and pipeline statuses w
 
 Built with Rust. Mouse-first interaction. Heavily inspired by [herdr](https://herdr.dev/).
 
-<video src="caps/recording.mp4" autoplay loop muted playsinline></video>
+<video src="https://github.com/user-attachments/assets/63cdd76b-889c-4319-a362-89765f053828" autoplay loop muted playsinline></video>
 
 <div>
   <a href="caps/10_merge_request_pipeline_detail.png"><img src="caps/10_merge_request_pipeline_detail.png" width="24%" alt="Pipeline detail" /></a>
