@@ -4,7 +4,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use crate::app::App;
 use crate::theme;
 
-const TABS: &[&str] = &["themes", "config"];
+const TABS: &[&str] = &["themes", "config", "about"];
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical = Layout::vertical([
@@ -99,7 +99,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     match app.settings_selected {
         0 => render_theme_tab(frame, app, content_area),
-        _ => render_config_tab(frame, app, content_area),
+        1 => render_config_tab(frame, app, content_area),
+        _ => render_about_tab(frame, app, content_area),
     }
 
     // Footer
@@ -156,6 +157,34 @@ fn render_theme_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         .filter(|i| (*i as u16) < list_area.height)
         .map(|i| Rect { x: list_area.x, y: list_area.y + i as u16, width: list_area.width, height: 1 })
         .collect();
+}
+
+fn render_about_tab(frame: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme;
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "lazyglab",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "GitLab TUI",
+            Style::default().fg(t.text_dim),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("made by ", Style::default().fg(t.text)),
+            Span::styled("@ragamo", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "https://github.com/ragamo/lazyglab",
+            Style::default().fg(t.text_dim),
+        )),
+    ];
+
+    let about_area = Rect { x: area.x + 3, y: area.y + 1, width: area.width.saturating_sub(4), height: area.height.saturating_sub(1) };
+    frame.render_widget(Paragraph::new(lines), about_area);
 }
 
 fn render_config_tab(frame: &mut Frame, app: &mut App, area: Rect) {

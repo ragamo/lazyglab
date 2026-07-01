@@ -644,7 +644,7 @@ impl App {
     }
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
-        const NUM_TABS: usize = 2;
+        const NUM_TABS: usize = 3;
         const NUM_CONFIG_FIELDS: usize = 2;
         match key.code {
             KeyCode::Esc => {
