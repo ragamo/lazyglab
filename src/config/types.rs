@@ -14,6 +14,8 @@ pub struct AppConfig {
 pub struct UiConfig {
     pub theme: Option<String>,
     pub refresh_interval_secs: Option<u64>,
+    /// Header background intensity: "soft" (theme bg) or "hard" (theme header_bg).
+    pub header_bg: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

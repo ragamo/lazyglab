@@ -16,7 +16,6 @@ use crate::ui::click_regions::ClickRegions;
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppScreen {
     Splash,
-    AuthModal,
     Main,
 }
 
@@ -96,6 +95,7 @@ pub enum FocusLayer {
     MrDetail,
     FindModal,
     SettingsModal,
+    AuthModal,
     ProjectDropdown,
 }
 
@@ -134,6 +134,7 @@ pub struct App {
     pub token_source_warning: Option<String>,
     pub auth_error: Option<String>,
     pub is_validating: bool,
+    pub auth_open: bool,
 
     pub provider: Option<Box<dyn Provider>>,
     pub current_user: Option<User>,
@@ -164,9 +165,21 @@ pub struct App {
     pub settings_open: bool,
     pub settings_selected: usize,
     pub settings_tab_areas: Vec<ratatui::prelude::Rect>,
+    pub settings_theme_areas: Vec<ratatui::prelude::Rect>,
+    pub settings_config_field: usize,
+    pub settings_refresh_dec_area: Option<ratatui::prelude::Rect>,
+    pub settings_refresh_inc_area: Option<ratatui::prelude::Rect>,
+    pub settings_header_soft_area: Option<ratatui::prelude::Rect>,
+    pub settings_header_hard_area: Option<ratatui::prelude::Rect>,
+    pub settings_apply_area: Option<ratatui::prelude::Rect>,
+    pub settings_close_area: Option<ratatui::prelude::Rect>,
     pub theme_selected: usize,
     pub theme_confirmed: usize,
     pub theme: &'static Theme,
+
+    // Header background: true = soft (theme bg), false = hard (theme header_bg)
+    pub header_bg_soft: bool,
+    pub header_bg_confirmed: bool,
 
     // Table navigation (separate state per tab)
     pub mr_nav: TableNav,
@@ -235,6 +248,9 @@ impl App {
             .position(|t| t.name == active_theme.name)
             .unwrap_or(0);
 
+        // Default to "soft" (theme bg) unless explicitly set to "hard".
+        let header_bg_soft = config.ui.header_bg.as_deref() != Some("hard");
+
         let mut app = Self {
             screen: AppScreen::Splash,
             should_quit: false,
@@ -242,6 +258,7 @@ impl App {
             token_source_warning: None,
             auth_error: None,
             is_validating: false,
+            auth_open: false,
             provider: None,
             current_user: None,
             merge_requests: Vec::new(),
@@ -270,9 +287,19 @@ impl App {
             settings_open: false,
             settings_selected: 0,
             settings_tab_areas: Vec::new(),
+            settings_theme_areas: Vec::new(),
+            settings_config_field: 0,
+            settings_refresh_dec_area: None,
+            settings_refresh_inc_area: None,
+            settings_header_soft_area: None,
+            settings_header_hard_area: None,
+            settings_apply_area: None,
+            settings_close_area: None,
             theme_selected,
             theme_confirmed: theme_selected,
             theme: active_theme,
+            header_bg_soft,
+            header_bg_confirmed: header_bg_soft,
             mr_nav: TableNav::default(),
             pipeline_nav: TableNav::default(),
             mr_detail_open: false,
@@ -317,6 +344,7 @@ impl App {
         if self.project_selector_open { return FocusLayer::ProjectDropdown; }
         if self.find_modal_open { return FocusLayer::FindModal; }
         if self.settings_open { return FocusLayer::SettingsModal; }
+        if self.auth_open { return FocusLayer::AuthModal; }
         if self.mr_detail_open { return FocusLayer::MrDetail; }
         FocusLayer::Main
     }
@@ -340,7 +368,13 @@ impl App {
                 self.submit_token();
             }
             None => {
-                self.screen = AppScreen::AuthModal;
+                self.screen = AppScreen::Main;
+                // Not logged in: still load the selected favorite so public
+                // projects show their data without a token.
+                if !self.projects.is_empty() {
+                    self.load_merge_requests();
+                    self.load_pipelines();
+                }
             }
         }
     }
@@ -381,24 +415,10 @@ impl App {
                     self.should_quit = true;
                 }
             }
-            AppScreen::AuthModal => {
-                if self.is_validating {
-                    return;
-                }
-                match key.code {
-                    KeyCode::Esc => self.should_quit = true,
-                    KeyCode::Enter => self.submit_token(),
-                    KeyCode::Backspace => {
-                        self.token_input.pop();
-                    }
-                    KeyCode::Char(c) => {
-                        self.token_input.push(c);
-                    }
-                    _ => {}
-                }
-            }
             AppScreen::Main => {
-                if self.find_modal_open {
+                if self.auth_open {
+                    self.handle_auth_key(key);
+                } else if self.find_modal_open {
                     self.handle_find_key(key);
                 } else if self.settings_open {
                     self.handle_settings_key(key);
@@ -504,12 +524,34 @@ impl App {
                         }
                         KeyCode::Char(',') => {
                             self.settings_open = true;
+                            self.settings_config_field = 0;
                             self.settings_refresh_interval = self.refresh_interval_secs();
+                            self.header_bg_confirmed = self.header_bg_soft;
                         }
                         _ => {}
                     }
                 }
             }
+        }
+    }
+
+    fn handle_auth_key(&mut self, key: KeyEvent) {
+        if self.is_validating {
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.auth_open = false;
+                self.auth_error = None;
+            }
+            KeyCode::Enter => self.submit_token(),
+            KeyCode::Backspace => {
+                self.token_input.pop();
+            }
+            KeyCode::Char(c) => {
+                self.token_input.push(c);
+            }
+            _ => {}
         }
     }
 
@@ -603,17 +645,19 @@ impl App {
 
     fn handle_settings_key(&mut self, key: KeyEvent) {
         const NUM_TABS: usize = 2;
+        const NUM_CONFIG_FIELDS: usize = 2;
         match key.code {
             KeyCode::Esc => {
-                // Cancel: revert theme preview to confirmed
+                // Cancel: revert live previews to confirmed values
                 self.theme = theme::ALL_THEMES[self.theme_confirmed];
                 self.theme_selected = self.theme_confirmed;
+                self.header_bg_soft = self.header_bg_confirmed;
                 self.settings_open = false;
             }
-            KeyCode::Tab | KeyCode::Right => {
+            KeyCode::Tab => {
                 self.settings_selected = (self.settings_selected + 1) % NUM_TABS;
             }
-            KeyCode::BackTab | KeyCode::Left => {
+            KeyCode::BackTab => {
                 self.settings_selected = (self.settings_selected + NUM_TABS - 1) % NUM_TABS;
             }
             KeyCode::Up | KeyCode::Char('k') if self.settings_selected == 0 => {
@@ -628,28 +672,44 @@ impl App {
                     self.theme = theme::ALL_THEMES[self.theme_selected];
                 }
             }
+            // Config tab: Up/Down moves between fields
             KeyCode::Up | KeyCode::Char('k') if self.settings_selected == 1 => {
-                if self.settings_refresh_interval < 120 {
-                    self.settings_refresh_interval += 1;
-                }
+                self.settings_config_field =
+                    (self.settings_config_field + NUM_CONFIG_FIELDS - 1) % NUM_CONFIG_FIELDS;
             }
             KeyCode::Down | KeyCode::Char('j') if self.settings_selected == 1 => {
-                if self.settings_refresh_interval > 5 {
-                    self.settings_refresh_interval -= 1;
+                self.settings_config_field =
+                    (self.settings_config_field + 1) % NUM_CONFIG_FIELDS;
+            }
+            // Config tab: Left/Right adjusts the selected field's value (live preview)
+            KeyCode::Right | KeyCode::Char('l') if self.settings_selected == 1 => {
+                match self.settings_config_field {
+                    0 => if self.settings_refresh_interval < 120 { self.settings_refresh_interval += 1; },
+                    _ => self.header_bg_soft = !self.header_bg_soft,
+                }
+            }
+            KeyCode::Left | KeyCode::Char('h') if self.settings_selected == 1 => {
+                match self.settings_config_field {
+                    0 => if self.settings_refresh_interval > 5 { self.settings_refresh_interval -= 1; },
+                    _ => self.header_bg_soft = !self.header_bg_soft,
                 }
             }
             KeyCode::Enter => {
-                if self.settings_selected == 1 {
-                    self.config.ui.refresh_interval_secs = Some(self.settings_refresh_interval);
-                } else {
-                    self.theme_confirmed = self.theme_selected;
-                    self.config.ui.theme = Some(self.theme.name.to_string());
-                }
-                let _ = config::save_config(&self.config);
-                self.settings_open = false;
+                self.apply_settings();
             }
             _ => {}
         }
+    }
+
+    fn apply_settings(&mut self) {
+        self.theme_confirmed = self.theme_selected;
+        self.config.ui.theme = Some(self.theme.name.to_string());
+        self.config.ui.refresh_interval_secs = Some(self.settings_refresh_interval);
+        self.header_bg_confirmed = self.header_bg_soft;
+        self.config.ui.header_bg =
+            Some(if self.header_bg_soft { "soft" } else { "hard" }.to_string());
+        let _ = config::save_config(&self.config);
+        self.settings_open = false;
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
@@ -683,7 +743,7 @@ impl App {
         }
 
         if mouse.kind == MouseEventKind::ScrollDown {
-            if !self.find_modal_open && !self.settings_open {
+            if !self.find_modal_open && !self.settings_open && !self.auth_open {
                 if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
                     if let Some(bounds) = self.click_regions.mr_detail.bounds {
                         if hit(pos, bounds) {
@@ -725,7 +785,7 @@ impl App {
         }
 
         if mouse.kind == MouseEventKind::ScrollUp {
-            if !self.find_modal_open && !self.settings_open {
+            if !self.find_modal_open && !self.settings_open && !self.auth_open {
                 if self.mr_detail_open && self.active_tab == Tab::MergeRequests {
                     if let Some(bounds) = self.click_regions.mr_detail.bounds {
                         if hit(pos, bounds) {
@@ -774,6 +834,7 @@ impl App {
             FocusLayer::ProjectDropdown => self.handle_mouse_dropdown(pos),
             FocusLayer::FindModal       => self.handle_mouse_find(pos),
             FocusLayer::SettingsModal   => self.handle_mouse_settings(pos),
+            FocusLayer::AuthModal       => {} // consume clicks; modal is keyboard-driven
             FocusLayer::MrDetail        => self.handle_mouse_detail(pos),
             FocusLayer::Main            => self.handle_mouse_main(pos),
         }
@@ -828,10 +889,71 @@ impl App {
     }
 
     fn handle_mouse_settings(&mut self, pos: (u16, u16)) {
+        // Section tabs
         for (i, area) in self.settings_tab_areas.iter().enumerate() {
             if hit(pos, *area) {
                 self.settings_selected = i;
                 return;
+            }
+        }
+
+        // Footer: apply / close
+        if let Some(area) = self.settings_apply_area {
+            if hit(pos, area) {
+                self.apply_settings();
+                return;
+            }
+        }
+        if let Some(area) = self.settings_close_area {
+            if hit(pos, area) {
+                self.theme = theme::ALL_THEMES[self.theme_confirmed];
+                self.theme_selected = self.theme_confirmed;
+                self.header_bg_soft = self.header_bg_confirmed;
+                self.settings_open = false;
+                return;
+            }
+        }
+
+        // Themes tab: click a theme to select + live-preview it
+        if self.settings_selected == 0 {
+            for (i, area) in self.settings_theme_areas.iter().enumerate() {
+                if hit(pos, *area) {
+                    self.theme_selected = i;
+                    self.theme = theme::ALL_THEMES[i];
+                    return;
+                }
+            }
+        }
+
+        // Config tab: refresh +/- and header background soft/hard (live preview)
+        if self.settings_selected == 1 {
+            if let Some(area) = self.settings_refresh_dec_area {
+                if hit(pos, area) {
+                    self.settings_config_field = 0;
+                    if self.settings_refresh_interval > 5 { self.settings_refresh_interval -= 1; }
+                    return;
+                }
+            }
+            if let Some(area) = self.settings_refresh_inc_area {
+                if hit(pos, area) {
+                    self.settings_config_field = 0;
+                    if self.settings_refresh_interval < 120 { self.settings_refresh_interval += 1; }
+                    return;
+                }
+            }
+            if let Some(area) = self.settings_header_soft_area {
+                if hit(pos, area) {
+                    self.settings_config_field = 1;
+                    self.header_bg_soft = true;
+                    return;
+                }
+            }
+            if let Some(area) = self.settings_header_hard_area {
+                if hit(pos, area) {
+                    self.settings_config_field = 1;
+                    self.header_bg_soft = false;
+                    return;
+                }
             }
         }
         // Consume all other clicks (block pass-through)
@@ -919,10 +1041,21 @@ impl App {
             }
         }
 
+        if let Some(area) = self.click_regions.header.login_link {
+            if hit(pos, area) {
+                self.auth_open = true;
+                self.token_input.clear();
+                self.auth_error = None;
+                return;
+            }
+        }
+
         if let Some(area) = self.click_regions.header.settings_link {
             if hit(pos, area) {
                 self.settings_open = true;
+                self.settings_config_field = 0;
                 self.settings_refresh_interval = self.refresh_interval_secs();
+                self.header_bg_confirmed = self.header_bg_soft;
                 return;
             }
         }
@@ -1045,6 +1178,9 @@ impl App {
                 self.is_validating = false;
                 self.current_user = Some(user);
                 self.screen = AppScreen::Main;
+                self.auth_open = false;
+                self.auth_error = None;
+                self.token_source_warning = None;
 
                 self.config.auth.token = Some(self.token_input.clone());
                 let _ = config::save_config(&self.config);
@@ -1057,7 +1193,8 @@ impl App {
             AppMessage::TokenValidated(Err(e)) => {
                 self.is_validating = false;
                 self.auth_error = Some(e.to_string());
-                self.screen = AppScreen::AuthModal;
+                self.screen = AppScreen::Main;
+                self.auth_open = true;
             }
             AppMessage::ProjectsLoaded(_) => {}
             AppMessage::SearchResults(Ok(infos)) => {
@@ -1403,7 +1540,8 @@ impl App {
         self.current_user = None;
         self.merge_requests.clear();
         self.pipelines.clear();
-        self.screen = AppScreen::AuthModal;
+        self.screen = AppScreen::Main;
+        self.auth_open = false;
         self.auth_error = None;
         self.token_source_warning = None;
     }

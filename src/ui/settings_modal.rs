@@ -113,15 +113,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])),
         footer_area,
     );
+    let apply_label = " ↵ apply ";   // 9 columns
+    let close_label = " esc close "; // 11 columns
+    let total: u16 = 9 + 1 + 11;
+    let start_x = footer_area.x + footer_area.width.saturating_sub(total) / 2;
+    app.settings_apply_area = Some(Rect { x: start_x, y: footer_area.y, width: 9, height: 1 });
+    app.settings_close_area = Some(Rect { x: start_x + 10, y: footer_area.y, width: 11, height: 1 });
+
     let apply_footer = Paragraph::new(Line::from(vec![
-        Span::styled(" ↵ apply ", Style::default().fg(t.bg).bg(t.accent)),
+        Span::styled(apply_label, Style::default().fg(t.bg).bg(t.accent)),
         Span::raw(" "),
-        Span::styled(" esc close ", Style::default().fg(t.text).bg(t.border)),
+        Span::styled(close_label, Style::default().fg(t.text).bg(t.border)),
     ])).alignment(Alignment::Center);
     frame.render_widget(apply_footer, footer_area);
 }
 
-fn render_theme_tab(frame: &mut Frame, app: &App, area: Rect) {
+fn render_theme_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
 
     let items: Vec<ListItem> = theme::ALL_THEMES
@@ -143,40 +150,77 @@ fn render_theme_tab(frame: &mut Frame, app: &App, area: Rect) {
 
     let list_area = Rect { x: area.x, y: area.y, width: (area.width / 3).max(24), height: area.height };
     frame.render_widget(List::new(items), list_area);
+
+    // Click areas, one row per theme (visible rows only)
+    app.settings_theme_areas = (0..theme::ALL_THEMES.len())
+        .filter(|i| (*i as u16) < list_area.height)
+        .map(|i| Rect { x: list_area.x, y: list_area.y + i as u16, width: list_area.width, height: 1 })
+        .collect();
 }
 
-fn render_config_tab(frame: &mut Frame, app: &App, area: Rect) {
+fn render_config_tab(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
 
-    let label_area = Rect { x: area.x + 2, y: area.y + 1, width: area.width.saturating_sub(4), height: 1 };
+    let cursor = |selected: bool| if selected {
+        Span::styled(" ▸ ", Style::default().fg(t.accent))
+    } else {
+        Span::raw("   ")
+    };
+    let val_style = |active: bool| if active {
+        Style::default().fg(t.bg).bg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(t.text_dim)
+    };
+    const CURSOR_W: u16 = 3;
+
+    // Field 0: refresh interval — "  Refresh interval:  [-] N secs [+]"
+    let refresh_y = area.y + 1;
+    let refresh_label = "Refresh interval:  ";
+    let value_text = format!(" {} secs ", app.settings_refresh_interval);
+    let dec_x = area.x + CURSOR_W + refresh_label.len() as u16;
+    let val_x = dec_x + 3; // "[-]"
+    let inc_x = val_x + value_text.len() as u16;
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled("Refresh interval: ", Style::default().fg(t.text)),
-            Span::styled(
-                format!("{} secs", app.settings_refresh_interval),
-                Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
-            ),
+            cursor(app.settings_config_field == 0),
+            Span::styled(refresh_label, Style::default().fg(t.text)),
+            Span::styled("[-]", Style::default().fg(t.accent)),
+            Span::styled(value_text.clone(), Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+            Span::styled("[+]", Style::default().fg(t.accent)),
         ])),
-        label_area,
+        Rect { x: area.x, y: refresh_y, width: area.width.saturating_sub(2), height: 1 },
     );
+    app.settings_refresh_dec_area = Some(Rect { x: dec_x, y: refresh_y, width: 3, height: 1 });
+    app.settings_refresh_inc_area = Some(Rect { x: inc_x, y: refresh_y, width: 3, height: 1 });
 
-    let hint_area = Rect { x: area.x + 2, y: area.y + 3, width: area.width.saturating_sub(4), height: 1 };
+    // Field 1: header background (soft | hard)
+    let header_y = area.y + 2;
+    let header_label = "Header background: ";
+    let soft_x = area.x + CURSOR_W + header_label.len() as u16;
+    let hard_x = soft_x + 6 + 1; // " soft " + separator space
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            cursor(app.settings_config_field == 1),
+            Span::styled(header_label, Style::default().fg(t.text)),
+            Span::styled(" soft ", val_style(app.header_bg_soft)),
+            Span::raw(" "),
+            Span::styled(" hard ", val_style(!app.header_bg_soft)),
+        ])),
+        Rect { x: area.x, y: header_y, width: area.width.saturating_sub(2), height: 1 },
+    );
+    app.settings_header_soft_area = Some(Rect { x: soft_x, y: header_y, width: 6, height: 1 });
+    app.settings_header_hard_area = Some(Rect { x: hard_x, y: header_y, width: 6, height: 1 });
+
+    let hint_area = Rect { x: area.x + 3, y: area.y + 4, width: area.width.saturating_sub(4), height: 1 };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("↑↓", Style::default().fg(t.accent)),
-            Span::styled(" adjust (5-120)  ", Style::default().fg(t.text_dim)),
+            Span::styled(" field  ", Style::default().fg(t.text_dim)),
+            Span::styled("←→", Style::default().fg(t.accent)),
+            Span::styled(" adjust  ", Style::default().fg(t.text_dim)),
             Span::styled("↵", Style::default().fg(t.accent)),
             Span::styled(" save", Style::default().fg(t.text_dim)),
         ])),
         hint_area,
-    );
-
-    let desc_area = Rect { x: area.x + 2, y: area.y + 5, width: area.width.saturating_sub(4), height: 1 };
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "Auto-refresh interval for pipeline detail and job logs when jobs are running.",
-            Style::default().fg(t.text_dim),
-        )),
-        desc_area,
     );
 }

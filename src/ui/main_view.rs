@@ -28,8 +28,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     let t = app.theme;
+    let header_bg = if app.header_bg_soft { t.bg } else { t.header_bg };
 
-    let bg_block = Block::default().style(Style::default().bg(t.header_bg));
+    let bg_block = Block::default().style(Style::default().bg(header_bg));
     frame.render_widget(bg_block, area);
 
     let header_layout = Layout::horizontal([
@@ -52,7 +53,7 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
         &selector_text,
         Style::default()
             .fg(t.text)
-            .bg(t.header_bg)
+            .bg(header_bg)
             .add_modifier(Modifier::BOLD),
     ))
     .block(
@@ -97,6 +98,8 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     } else {
         vec![
             Span::styled("lazyglab", Style::default().fg(t.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(" │ ", Style::default().fg(t.text_dim)),
+            Span::styled("login", Style::default().fg(t.text_dim)),
             Span::raw(" "),
         ]
     };
@@ -104,13 +107,22 @@ fn render_header(frame: &mut Frame, app: &mut App, area: Rect) {
     let right_widget = Paragraph::new(Line::from(right_text)).alignment(Alignment::Right);
     frame.render_widget(right_widget, right_area);
 
-    // logout click area: last ~8 chars on the right
     if app.current_user.is_some() {
+        // logout click area: last ~8 chars on the right
         let logout_width = 8u16;
         app.click_regions.header.logout_link = Some(Rect {
             x: right_area.x + right_area.width.saturating_sub(logout_width + 1),
             y: right_area.y,
             width: logout_width,
+            height: right_area.height,
+        });
+    } else {
+        // login click area: last ~6 chars on the right
+        let login_width = 6u16;
+        app.click_regions.header.login_link = Some(Rect {
+            x: right_area.x + right_area.width.saturating_sub(login_width + 1),
+            y: right_area.y,
+            width: login_width,
             height: right_area.height,
         });
     }

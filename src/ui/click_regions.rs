@@ -26,6 +26,7 @@ pub struct HeaderRegion {
     pub project_selector: Option<Rect>,
     pub find_link: Option<Rect>,
     pub logout_link: Option<Rect>,
+    pub login_link: Option<Rect>,
     pub settings_link: Option<Rect>,
     pub tab_mr: Option<Rect>,
     pub tab_pipelines: Option<Rect>,
