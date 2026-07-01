@@ -654,10 +654,11 @@ impl App {
                 self.header_bg_soft = self.header_bg_confirmed;
                 self.settings_open = false;
             }
-            KeyCode::Tab => {
+            // Switch section tabs with Left/Right (or Tab)
+            KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
                 self.settings_selected = (self.settings_selected + 1) % NUM_TABS;
             }
-            KeyCode::BackTab => {
+            KeyCode::BackTab | KeyCode::Left | KeyCode::Char('h') => {
                 self.settings_selected = (self.settings_selected + NUM_TABS - 1) % NUM_TABS;
             }
             KeyCode::Up | KeyCode::Char('k') if self.settings_selected == 0 => {
@@ -681,18 +682,16 @@ impl App {
                 self.settings_config_field =
                     (self.settings_config_field + 1) % NUM_CONFIG_FIELDS;
             }
-            // Config tab: Left/Right adjusts the selected field's value (live preview)
-            KeyCode::Right | KeyCode::Char('l') if self.settings_selected == 1 => {
-                match self.settings_config_field {
-                    0 => if self.settings_refresh_interval < 120 { self.settings_refresh_interval += 1; },
-                    _ => self.header_bg_soft = !self.header_bg_soft,
-                }
+            // Config tab: +/- adjusts the refresh timer (live preview)
+            KeyCode::Char('+') | KeyCode::Char('=') if self.settings_selected == 1 => {
+                if self.settings_refresh_interval < 120 { self.settings_refresh_interval += 1; }
             }
-            KeyCode::Left | KeyCode::Char('h') if self.settings_selected == 1 => {
-                match self.settings_config_field {
-                    0 => if self.settings_refresh_interval > 5 { self.settings_refresh_interval -= 1; },
-                    _ => self.header_bg_soft = !self.header_bg_soft,
-                }
+            KeyCode::Char('-') | KeyCode::Char('_') if self.settings_selected == 1 => {
+                if self.settings_refresh_interval > 5 { self.settings_refresh_interval -= 1; }
+            }
+            // Config tab: Space toggles the header background (live preview)
+            KeyCode::Char(' ') if self.settings_selected == 1 && self.settings_config_field == 1 => {
+                self.header_bg_soft = !self.header_bg_soft;
             }
             KeyCode::Enter => {
                 self.apply_settings();

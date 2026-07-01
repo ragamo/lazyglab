@@ -106,10 +106,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let footer_area = outer[1];
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(" ↑↓", Style::default().fg(t.accent)),
-            Span::styled(" select  ", Style::default().fg(t.text_dim)),
-            Span::styled("tab", Style::default().fg(t.accent)),
-            Span::styled(" section", Style::default().fg(t.text_dim)),
+            Span::styled(" ←→", Style::default().fg(t.accent)),
+            Span::styled(" section  ", Style::default().fg(t.text_dim)),
+            Span::styled("↑↓", Style::default().fg(t.accent)),
+            Span::styled(" select", Style::default().fg(t.text_dim)),
         ])),
         footer_area,
     );
@@ -216,8 +216,10 @@ fn render_config_tab(frame: &mut Frame, app: &mut App, area: Rect) {
         Paragraph::new(Line::from(vec![
             Span::styled("↑↓", Style::default().fg(t.accent)),
             Span::styled(" field  ", Style::default().fg(t.text_dim)),
-            Span::styled("←→", Style::default().fg(t.accent)),
-            Span::styled(" adjust  ", Style::default().fg(t.text_dim)),
+            Span::styled("+/-", Style::default().fg(t.accent)),
+            Span::styled(" timer  ", Style::default().fg(t.text_dim)),
+            Span::styled("space", Style::default().fg(t.accent)),
+            Span::styled(" bg  ", Style::default().fg(t.text_dim)),
             Span::styled("↵", Style::default().fg(t.accent)),
             Span::styled(" save", Style::default().fg(t.text_dim)),
         ])),
